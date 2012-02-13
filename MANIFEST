@@ -1,0 +1,14 @@
+Changes
+MANIFEST			This list of files
+META.yml			Module meta-data (added by MakeMaker)
+Makefile.PL
+README
+VERSION
+lib/Config/Validator.pm
+t/1conv.t
+t/1group.t
+t/1ref.t
+t/1simple.t
+t/2schema.t
+t/3pod.t
+t/4podcov.t
