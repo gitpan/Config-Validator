@@ -5,8 +5,8 @@ Makefile.PL
 README
 VERSION
 lib/Config/Validator.pm
-t/1conv.t
 t/1group.t
+t/1misc.t
 t/1ref.t
 t/1simple.t
 t/2schema.t

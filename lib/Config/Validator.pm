@@ -13,8 +13,8 @@
 package Config::Validator;
 use strict;
 use warnings;
-our $VERSION  = "0.1";
-our $REVISION = sprintf("%d.%02d", q$Revision: 1.11 $ =~ /(\d+)\.(\d+)/);
+our $VERSION  = "0.2";
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.12 $ =~ /(\d+)\.(\d+)/);
 
 #
 # export control
@@ -24,7 +24,7 @@ use Exporter;
 our(@ISA, @EXPORT, @EXPORT_OK);
 @ISA = qw(Exporter);
 @EXPORT = qw();
-@EXPORT_OK = qw(string2hash hash2string);
+@EXPORT_OK = qw(string2hash hash2string is_regexp);
 
 #
 # used modules
@@ -685,9 +685,13 @@ given) to a list of L<Getopt::Long> compatible options
 
 =head1 FUNCTIONS
 
-The following functions are available:
+The following convenient functions are available:
 
 =over
+
+=item is_regexp(SCALAR)
+
+check if the given scalar is a compiled regular expression
 
 =item string2hash(STRING)
 
