@@ -4,6 +4,12 @@ META.yml			Module meta-data (added by MakeMaker)
 Makefile.PL
 README
 VERSION
+eg/ex1.pl
+eg/ex2.pl
+eg/ex3.pl
+eg/ex3-cfg1
+eg/ex4.pl
+eg/ex4-cfg1
 lib/Config/Validator.pm
 t/1group.t
 t/1misc.t

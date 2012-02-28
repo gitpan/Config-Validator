@@ -1,7 +1,13 @@
 Revision history for Config-Validator:
 
+0.3	Tue Feb 28 2012
+	* Added the treeify() function.
+	* Added the is_true() and is_false() functions.
+	* Added the traverse() method.
+	* Added some example code in the "eg" directory.
+
 0.2	Tue Feb 14 2012
-	* Documented and made public is_regexp().
+	* Documented and made public the is_regexp() function.
 
 0.1	Mon Feb 13 2012
 	* First version released in CPAN.

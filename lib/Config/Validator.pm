@@ -13,8 +13,8 @@
 package Config::Validator;
 use strict;
 use warnings;
-our $VERSION  = "0.2";
-our $REVISION = sprintf("%d.%02d", q$Revision: 1.12 $ =~ /(\d+)\.(\d+)/);
+our $VERSION  = "0.3";
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.17 $ =~ /(\d+)\.(\d+)/);
 
 #
 # export control
@@ -24,7 +24,7 @@ use Exporter;
 our(@ISA, @EXPORT, @EXPORT_OK);
 @ISA = qw(Exporter);
 @EXPORT = qw();
-@EXPORT_OK = qw(string2hash hash2string is_regexp);
+@EXPORT_OK = qw(string2hash hash2string treeify is_true is_false is_regexp);
 
 #
 # used modules
@@ -71,17 +71,6 @@ sub _string ($) {
 }
 
 #
-# test if something is a regular expression
-#
-
-if ($] >= 5.010) {
-    require re;
-    re->import(qw(is_regexp));
-} else {
-    *is_regexp = sub { return(ref($_[0]) eq "Regexp") };
-}
-
-#
 # format an error
 #
 
@@ -99,6 +88,22 @@ sub _errfmt (@) {
 	$string .= "\n" . $tmp;
     }
     return($string);
+}
+
+#
+# test if a boolean is true or false
+#
+
+sub is_true ($) {
+    my($value) = @_;
+
+    return($value and not ref($value) and $value eq "true");
+}
+
+sub is_false ($) {
+    my($value) = @_;
+
+    return($value and not ref($value) and $value eq "false");
 }
 
 #+++############################################################################
@@ -143,38 +148,22 @@ sub hash2string (@) {
 }
 
 #
-# schema -> options
+# treeify
 #
 
-sub _options ($$$@);
-sub _options ($$$@) {
-    my($valid, $schema, $type, @path) = @_;
-    my($field, @list);
+sub treeify ($);
+sub treeify ($) {
+    my($hash) = @_;
+    my($key, $value);
 
-    $type ||= $schema->{type};
-    # terminal
-    return(join("-", @path) . "=s") if $type eq "string";
-    return(join("-", @path) . "=f") if $type eq "number";
-    return(join("-", @path) . "=i") if $type eq "integer";
-    return(join("-", @path)) if $type eq "boolean";
-    # assumed to come from strings
-    return(join("-", @path) . "=s") if $type =~ /^isa\(.+\)$/ or $type eq "table(string)";
-    # recursion
-    if ($type =~ /^list\?\((.+)\)$/) {
-	return(map($_ . "\@", _options($valid, $schema, $1, @path)));
+    foreach $key (grep(/-/, keys(%$hash))) {
+	error_die("unexpected configuration name: %s", $key)
+	    unless $key =~ /^(\w+)-(.+)$/;
+	$hash->{$1}{$2} = delete($hash->{$key});
     }
-    if ($type =~ /^valid\((.+)\)$/) {
-	_fatal("options(): unknown schema: %s", $1) unless $valid->{$1};
-	return(_options($valid, $valid->{$1}, undef, @path));
+    foreach $value (values(%$hash)) {
+	treeify($value) if ref($value) eq "HASH";
     }
-    if ($type eq "struct") {
-	foreach $field (keys(%{ $schema->{fields} })) {
-	    push(@list, _options($valid, $schema->{fields}{$field}, undef, @path, $field));
-	}
-	return(@list);
-    }
-    # unsupported
-    _fatal("options(): unsupported type: %s", $type);
 }
 
 #+++############################################################################
@@ -297,9 +286,137 @@ $_BuiltIn->{schema} = {
 
 #+++############################################################################
 #                                                                              #
+# options helpers                                                              #
+#                                                                              #
+#---############################################################################
+
+#
+# schema -> options
+#
+
+sub _options ($$$@);
+sub _options ($$$@) {
+    my($valid, $schema, $type, @path) = @_;
+    my($field, @list);
+
+    $type ||= $schema->{type};
+    # terminal
+    return(join("-", @path) . "=s") if $type eq "string";
+    return(join("-", @path) . "=f") if $type eq "number";
+    return(join("-", @path) . "=i") if $type eq "integer";
+    return(join("-", @path)) if $type eq "boolean";
+    # assumed to come from strings
+    return(join("-", @path) . "=s") if $type =~ /^isa\(.+\)$/ or $type eq "table(string)";
+    # recursion
+    if ($type =~ /^list\?\((.+)\)$/) {
+	return(map($_ . "\@", _options($valid, $schema, $1, @path)));
+    }
+    if ($type =~ /^valid\((.+)\)$/) {
+	_fatal("options(): unknown schema: %s", $1) unless $valid->{$1};
+	return(_options($valid, $valid->{$1}, undef, @path));
+    }
+    if ($type eq "struct") {
+	foreach $field (keys(%{ $schema->{fields} })) {
+	    push(@list, _options($valid, $schema->{fields}{$field}, undef, @path, $field));
+	}
+	return(@list);
+    }
+    # unsupported
+    _fatal("options(): unsupported type: %s", $type);
+}
+
+#+++############################################################################
+#                                                                              #
+# traverse helpers                                                             #
+#                                                                              #
+#---############################################################################
+
+#
+# traverse data
+#
+
+sub _traverse ($$$$$@);
+sub _traverse ($$$$$@) {
+    my($callback, $valid, $schema, $type, $data, @path) = @_;
+    my($tmp, $reftype, $subtype, $index);
+
+    # set the type if missing
+    $type ||= $schema->{type};
+    # call the callback and stop unless we are told to continue
+    return unless $callback->($valid, $schema, $type, $_[4], @path);
+    # terminal
+    return if $type =~ /^(anything|string|boolean|number|integer|code|regexp)$/;
+    return if $type =~ /^(undef|undefined|defined|reference|blessed|unblessed|object)$/;
+    # recursion
+    $reftype = reftype($data) || "";
+    if ($type =~ /^valid\((.+)\)$/) {
+	_fatal("traverse(): unknown schema: %s", $1) unless $valid->{$1};
+	_traverse($callback, $valid, $valid->{$1}, undef, $_[4], @path);
+	return;
+    }
+    if ($type eq "struct") {
+	return unless $reftype eq "HASH";
+	foreach $tmp (keys(%{ $schema->{fields} })) {
+	    next unless exists($data->{$tmp});
+	    _traverse($callback, $valid, $schema->{fields}{$tmp}, undef, $data->{$tmp}, @path, $tmp);
+	}
+	return;
+    }
+    if ($type =~ /^list$/) {
+	$schema = $schema->{subtype};
+	goto list_recursion;
+    }
+    if ($type =~ /^list\((.+)\)$/) {
+	$subtype = $1;
+	goto list_recursion;
+    }
+    if ($type =~ /^list\?\((.+)\)$/) {
+	$subtype = $1;
+	goto list_recursion if $reftype eq "ARRAY";
+	_traverse($callback, $valid, $schema, $subtype, $_[4], @path);
+	return;
+    }
+    if ($type =~ /^table$/) {
+	$schema = $schema->{subtype};
+	goto table_recursion;
+    }
+    if ($type =~ /^table\((.+)\)$/) {
+	$subtype = $1;
+	goto table_recursion;
+    }
+    # unsupported
+    _fatal("traverse(): unsupported type: %s", $type);
+  list_recursion:
+    return unless $reftype eq "ARRAY";
+    $index = 0;
+    foreach $tmp (@$data) {
+	_traverse($callback, $valid, $schema, $subtype, $tmp, @path, $index);
+    }
+    return;
+  table_recursion:
+    return unless $reftype eq "HASH";
+    foreach $tmp (keys(%$data)) {
+	_traverse($callback, $valid, $schema, $subtype, $data->{$tmp}, @path, $tmp);
+    }
+    return;
+}
+
+#+++############################################################################
+#                                                                              #
 # validation helpers                                                           #
 #                                                                              #
 #---############################################################################
+
+#
+# test if something is a regular expression
+#
+
+if ($] >= 5.010) {
+    require re;
+    re->import(qw(is_regexp));
+} else {
+    *is_regexp = sub { return(ref($_[0]) eq "Regexp") };
+}
 
 #
 # validate that a value is within a numerical range
@@ -374,8 +491,7 @@ sub _validate_struct ($$$) {
     foreach $tmp (keys(%{ $schema->{fields} })) {
 	$key = $tmp; # preserved outside loop
 	next if exists($data->{$key});
-	next if $schema->{fields}{$key}{optional}
-	    and $schema->{fields}{$key}{optional} eq "true";
+	next if is_true($schema->{fields}{$key}{optional});
 	return(sprintf("missing field: %s", $key));
     }
     # check the existing fields
@@ -556,6 +672,29 @@ sub new : method {
 }
 
 #
+# convert to a list of options
+#
+
+sub options : method {
+    my($self, $schema);
+
+    $self = shift(@_);
+    # find out which schema to convert to options
+    if (@_ == 0) {
+	_fatal("options(): no default schema") unless $self->{schema}{""};
+	$schema = $self->{schema}{""};
+    } elsif (@_ == 1) {
+	$schema = shift(@_);
+	_fatal("options(): unknown schema: %s", $schema) unless $self->{schema}{$schema};
+	$schema = $self->{schema}{$schema};
+    } else {
+	_fatal("options(): unexpected number of arguments: %d", scalar(@_));
+    }
+    # convert to options
+    return(_options($self->{schema}, $schema, undef));
+}
+
+#
 # validate the given data
 #
 
@@ -585,26 +724,30 @@ sub validate : method {
 }
 
 #
-# convert to options
+# traverse the given data
 #
 
-sub options : method {
-    my($self, $schema);
+sub traverse : method {
+    my($self, $callback, $data, $schema);
 
     $self = shift(@_);
-    # find out which schema to convert to options
-    if (@_ == 0) {
-	_fatal("options(): no default schema") unless $self->{schema}{""};
+    # find out what to traverse
+    if (@_ == 2) {
+	$callback = shift(@_);
+	$data = shift(@_);
+	_fatal("traverse(): no default schema") unless $self->{schema}{""};
 	$schema = $self->{schema}{""};
-    } elsif (@_ == 1) {
+    } elsif (@_ == 3) {
+	$callback = shift(@_);
+	$data = shift(@_);
 	$schema = shift(@_);
-	_fatal("options(): unknown schema: %s", $schema) unless $self->{schema}{$schema};
+	_fatal("traverse(): unknown schema: %s", $schema) unless $self->{schema}{$schema};
 	$schema = $self->{schema}{$schema};
     } else {
-	_fatal("options(): unexpected number of arguments: %d", scalar(@_));
+	_fatal("traverse(): unexpected number of arguments: %d", scalar(@_));
     }
-    # convert to options
-    return(_options($self->{schema}, $schema, undef));
+    # traverse data
+    _traverse($callback, $self->{schema}, $schema, undef, $data);
 }
 
 1;
@@ -671,15 +814,20 @@ The following methods are available:
 
 return a new Config::Validator object (class method)
 
+=item options([NAME])
+
+convert the named schema (or the default schema if the name is not
+given) to a list of L<Getopt::Long> compatible options
+
 =item validate(DATA[, NAME])
 
 validate the given data using the named schema (or the default schema
 if the name is not given)
 
-=item options([NAME])
+=item traverse(CALLBACK, DATA[, NAME])
 
-convert the named schema (or the default schema if the name is not
-given) to a list of L<Getopt::Long> compatible options
+traverse the given data using the named schema (or the default schema
+if the name is not given) and call the given CALLBACK on each node
 
 =back
 
@@ -688,6 +836,14 @@ given) to a list of L<Getopt::Long> compatible options
 The following convenient functions are available:
 
 =over
+
+=item is_true(SCALAR)
+
+check if the given scalar is the boolean C<true>
+
+=item is_false(SCALAR)
+
+check if the given scalar is the boolean C<false>
 
 =item is_regexp(SCALAR)
 
@@ -702,6 +858,11 @@ or hash reference
 
 convert a hash or hash reference into a string of space separated
 key=value pairs
+
+=item treeify(HASH)
+
+modify (in place) a hash reference to turn it into a tree, using the
+dash character to split keys
 
 =back
 
@@ -984,6 +1145,59 @@ Here is a simple example:
   @options = $validator->options();
   GetOptions(\%cfg, @options) or pod2usage(2);
   $validator->validate(\%cfg);
+
+=head2 ADVANCED VALIDATION
+
+This module can also be used to combine configuration and options
+validation using the same schema. The idea is to:
+
+=over
+
+=item *
+
+define a unique schema validating both configuration and options
+
+=item *
+
+parse the command line options using L<Getopt::Long> (first pass, to
+detect a C<--config> option)
+
+=item *
+
+read the configuration file using L<Config::General>
+
+=item *
+
+parse again the command line options, using the configuration data as
+default values
+
+=item *
+
+validate the merged configuration/options data
+
+=back
+
+In some situations, it may make sense to consider the configuration
+data as a tree and prefer:
+
+  <incoming>
+    uri = foo://host1:1234
+  </incoming>
+  <outgoing>
+    uri = foo://host2:2345
+  </outgoing>
+
+to:
+
+  incoming-uri = foo://host1:1234
+  outgoing-uri = foo://host2:2345
+
+The options() method flatten the schema to get a list of command line
+options and the treeify() function transform flat options (as returned
+by L<Getopt::Long>) into a deep tree so that it matches the schema.
+
+See the bundled examples for complete working programs illustrating
+all this.
 
 =head1 AUTHOR
 
