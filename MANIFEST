@@ -10,11 +10,14 @@ eg/ex3.pl
 eg/ex3-cfg1
 eg/ex4.pl
 eg/ex4-cfg1
+eg/ex5.pl
+eg/ex5-cfg1
 lib/Config/Validator.pm
 t/1group.t
 t/1misc.t
 t/1ref.t
 t/1simple.t
+t/1tree.t
 t/2schema.t
 t/3pod.t
 t/4podcov.t

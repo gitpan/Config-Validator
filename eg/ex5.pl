@@ -1,23 +1,34 @@
 #
-# ex3: simple use of Config::Validator with Getopt::Long and Config::General
+# ex5: use of Config::Validator's boolean with Getopt::Long and Config::General
 #
-# compared to ex1:
-#  - the --config option has been added
-#  - configuration can come both from a file and from the command line
+# note that boolean values can in fact be: undef (i.e. not set), true or false
 #
-# $ perl ex3.pl -h
-# $ perl ex3.pl --src-host foo --dst-host bar
-# $ perl ex3.pl --src-host foo --config ex3-cfg1
+# $ perl ex5.pl -h
+# $ perl ex5.pl --flag2 --no-flag3
+# $ perl ex5.pl --flag2 --no-flag1 --config ex5-cfg1
 #
 
 use strict;
 use warnings;
 use Config::General qw(ParseConfig);
-use Config::Validator qw();
+use Config::Validator qw(is_true is_false);
 use Data::Dumper qw(Dumper);
 use Getopt::Long qw(GetOptions);
 
 our($Validator, @Options, %Config, @Tmp, %Tmp);
+
+sub clean {
+    my($valid, $schema, $type, $data, @path) = @_;
+
+    return(1) unless $type eq "boolean";
+    return(0) if not defined($data) or is_true($data) or is_false($data);
+    if ($data eq "0") {
+	$_[3] = "false";
+    } elsif ($data eq "1") {
+	$_[3] = "true";
+    }
+    return(0);
+}
 
 $Data::Dumper::Indent = 1;
 $Data::Dumper::Sortkeys = 1;
@@ -25,11 +36,9 @@ $Data::Dumper::Sortkeys = 1;
 $Validator = Config::Validator->new({
     type => "struct",
     fields => {
-	"debug"    => { type => "integer", optional => "true" },
-	"dst-port" => { type => "integer", min => 0, max => 65535, optional => "true" },
-	"dst-host" => { type => "string", match => qr/^[\w\-\.]+$/ },
-	"src-port" => { type => "integer", min => 0, max => 65535, optional => "true" },
-	"src-host" => { type => "string", match => qr/^[\w\-\.]+$/ },
+	flag1 => { type => "boolean", optional => "true" },
+	flag2 => { type => "boolean", optional => "true" },
+	flag3 => { type => "boolean", optional => "true" },
     },
 });
 
@@ -55,6 +64,10 @@ if ($Tmp{config}) {
 } else {
     %Config = %Tmp;
 }
+
+# third step: transform the Getopt::Long boolean values (0 or 1) into true or false
+
+$Validator->traverse(\&clean, \%Config);
 
 $Validator->validate(\%Config);
 

@@ -13,8 +13,8 @@
 package Config::Validator;
 use strict;
 use warnings;
-our $VERSION  = "0.3";
-our $REVISION = sprintf("%d.%02d", q$Revision: 1.17 $ =~ /(\d+)\.(\d+)/);
+our $VERSION  = "0.4";
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.18 $ =~ /(\d+)\.(\d+)/);
 
 #
 # export control
@@ -24,7 +24,8 @@ use Exporter;
 our(@ISA, @EXPORT, @EXPORT_OK);
 @ISA = qw(Exporter);
 @EXPORT = qw();
-@EXPORT_OK = qw(string2hash hash2string treeify is_true is_false is_regexp);
+@EXPORT_OK = qw(string2hash hash2string treeify treeval is_true is_false is_regexp
+                listof mutex reqall reqany);
 
 #
 # used modules
@@ -106,6 +107,18 @@ sub is_false ($) {
     return($value and not ref($value) and $value eq "false");
 }
 
+#
+# return the given thing as a list
+#
+
+sub listof ($) {
+    my($thing) = @_;
+
+    return() unless defined($thing);
+    return(@$thing) if ref($thing) eq "ARRAY";
+    return($thing);
+}
+
 #+++############################################################################
 #                                                                              #
 # conversion helper functions                                                  #
@@ -164,6 +177,20 @@ sub treeify ($) {
     foreach $value (values(%$hash)) {
 	treeify($value) if ref($value) eq "HASH";
     }
+}
+
+#
+# return the value of the given option in a treeified hash
+#
+
+sub treeval ($$);
+sub treeval ($$) {
+    my($hash, $name) = @_;
+
+    return($hash->{$name}) if exists($hash->{$name});
+    return() unless $name =~ /^(\w+)-(.+)$/;
+    return() unless $hash->{$1};
+    return(treeval($hash->{$1}, $2));
 }
 
 #+++############################################################################
@@ -304,7 +331,7 @@ sub _options ($$$@) {
     return(join("-", @path) . "=s") if $type eq "string";
     return(join("-", @path) . "=f") if $type eq "number";
     return(join("-", @path) . "=i") if $type eq "integer";
-    return(join("-", @path)) if $type eq "boolean";
+    return(join("-", @path) . "!")  if $type eq "boolean";
     # assumed to come from strings
     return(join("-", @path) . "=s") if $type =~ /^isa\(.+\)$/ or $type eq "table(string)";
     # recursion
@@ -323,6 +350,59 @@ sub _options ($$$@) {
     }
     # unsupported
     _fatal("options(): unsupported type: %s", $type);
+}
+
+#
+# treat the given options as mutually exclusive
+#
+
+sub mutex ($@) {
+    my($hash, @options) = @_;
+    my($opt, @set);
+
+    foreach $opt (@options) {
+	next unless defined(treeval($hash, $opt));
+	push(@set, $opt);
+	_fatal("options %s and %s are mutually exclusive", @set) if @set == 2;
+    }
+}
+
+#
+# if the first option is set, all the others are required
+#
+
+sub reqall ($$@) {
+    my($hash, $opt1, @options) = @_;
+    my($opt2);
+
+    return unless not defined($opt1) or defined(treeval($hash, $opt1));
+    foreach $opt2 (@options) {
+	next if defined(treeval($hash, $opt2));
+	_fatal("option %s requires option %s", $opt1, $opt2) if defined($opt1);
+	_fatal("option %s is required", $opt2);
+    }
+}
+
+#
+# if the first option is set, one at least of the others is required
+#
+
+sub reqany ($$@) {
+    my($hash, $opt1, @options) = @_;
+    my($opt2);
+
+    return unless not defined($opt1) or defined(treeval($hash, $opt1));
+    foreach $opt2 (@options) {
+	return if defined(treeval($hash, $opt2));
+    }
+    if (@options <= 2) {
+	$opt2 = join(" or ", @options);
+    } else {
+	push(@options, join(" or ", splice(@options, -2)));
+	$opt2 = join(", ", @options);
+    }
+    _fatal("option %s requires option %s", $opt1, $opt2) if defined($opt1);
+    _fatal("option %s is required", $opt2);
 }
 
 #+++############################################################################
@@ -358,7 +438,8 @@ sub _traverse ($$$$$@) {
 	return unless $reftype eq "HASH";
 	foreach $tmp (keys(%{ $schema->{fields} })) {
 	    next unless exists($data->{$tmp});
-	    _traverse($callback, $valid, $schema->{fields}{$tmp}, undef, $data->{$tmp}, @path, $tmp);
+	    _traverse($callback, $valid, $schema->{fields}{$tmp}, undef,
+		      $data->{$tmp}, @path, $tmp);
 	}
 	return;
     }
@@ -663,7 +744,8 @@ sub new : method {
     # validate them
     {
     	local $_Known = $self->{schema};
-    	@errors = _validate($_BuiltIn, { type => "table(valid(schema))" }, $self->{schema});
+    	@errors = _validate($_BuiltIn, { type => "table(valid(schema))" },
+			    $self->{schema});
     }
     _fatal("new(): invalid schema: %s", _errfmt(@errors)) if @errors;
     # so far so good!
@@ -849,6 +931,11 @@ check if the given scalar is the boolean C<false>
 
 check if the given scalar is a compiled regular expression
 
+=item listof(SCALAR)
+
+return the given scalar as a list, dereferencing it if it is a list
+reference (this is very useful with the C<list?(X)> type)
+
 =item string2hash(STRING)
 
 convert a string of space separated key=value pairs into a hash
@@ -863,6 +950,23 @@ key=value pairs
 
 modify (in place) a hash reference to turn it into a tree, using the
 dash character to split keys
+
+=item treeval(HASH, NAME)
+
+return the value of the given option (e.g. C<foo-bar>) in a treeified
+hash
+
+=item mutex(HASH, NAME...)
+
+treat the given options as mutually exclusive
+
+=item reqall(HASH, NAME1, NAME...)
+
+if the first option is set, all the others are required
+
+=item reqany(HASH, NAME1, NAME...)
+
+if the first option is set, one at least of the others is required
 
 =back
 
@@ -1195,9 +1299,11 @@ to:
 The options() method flatten the schema to get a list of command line
 options and the treeify() function transform flat options (as returned
 by L<Getopt::Long>) into a deep tree so that it matches the schema.
+Then the treeval() function can conveniently access the value of an
+option.
 
 See the bundled examples for complete working programs illustrating
-all this.
+some of the possibilities of this module.
 
 =head1 AUTHOR
 

@@ -12,8 +12,8 @@ use strict;
 use warnings;
 use Config::General qw(ParseConfig);
 use Config::Validator qw(treeify);
-use Data::Dumper;
-use Getopt::Long;
+use Data::Dumper qw(Dumper);
+use Getopt::Long qw(GetOptions);
 
 our($Validator, @Options, %Config, @Tmp, %Tmp);
 
@@ -31,20 +31,17 @@ $Validator = Config::Validator->new(
     cfg => {
 	type => "struct",
 	fields => {
-	    config => { type => "string", optional => "true" },
 	    debug  => { type => "integer", optional => "true" },
 	    dst    => { type => "valid(svc)" },
-	    help   => { type => "boolean", optional => "true" },
 	    src    => { type => "valid(svc)" },
 	},
     },
 );
 
-@Options = sort($Validator->options("cfg"));
+@Options = sort($Validator->options("cfg"), "config=s", "help|h|?");
 
 foreach my $option (@Options) {
     $option =~ s/^debug.*$/debug|d+/;
-    $option =~ s/^help/help|h|?/;
 }
 
 # first step: parse the command line options to handle options like --help or --config
@@ -61,9 +58,10 @@ if ($Tmp{help}) {
 if ($Tmp{config}) {
     %Config = ParseConfig(-ConfigFile => $Tmp{config});
     treeify(\%Config);
-    # third step: parse again the command line options using defaults read from the file
+    # parse again the command line options using defaults read from the file
     @ARGV = @Tmp;
     GetOptions(\%Config, @Options) or die;
+    delete($Config{config});
 } else {
     %Config = %Tmp;
 }

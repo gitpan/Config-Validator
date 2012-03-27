@@ -1,5 +1,9 @@
 Revision history for Config-Validator:
 
+0.4	Tue Mar 27 2012
+	* Improved boolean handling with Getopt::Long.
+	* Added yet more convenient functions.
+
 0.3	Tue Feb 28 2012
 	* Added the treeify() function.
 	* Added the is_true() and is_false() functions.

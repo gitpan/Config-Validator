@@ -2,8 +2,7 @@
 # ex2: advanced use of Config::Validator with Getopt::Long
 #
 # compared to ex1:
-#  - aliases are given to --debug and --help
-#  - --debug can be repeated (Getopt::Long's "+")
+#  - --debug can be repeated (Getopt::Long's "+") and is aliased to -d
 #  - named schemas are used to avoid schema duplication
 #  - the configuration hash is treeified
 #
@@ -14,8 +13,8 @@
 use strict;
 use warnings;
 use Config::Validator qw(treeify);
-use Data::Dumper;
-use Getopt::Long;
+use Data::Dumper qw(Dumper);
+use Getopt::Long qw(GetOptions);
 
 our($Validator, @Options, %Config);
 
@@ -35,17 +34,15 @@ $Validator = Config::Validator->new(
 	fields => {
 	    debug => { type => "integer", optional => "true" },
 	    dst   => { type => "valid(svc)" },
-	    help  => { type => "boolean", optional => "true" },
 	    src   => { type => "valid(svc)" },
 	},
     },
 );
 
-@Options = sort($Validator->options("cfg"));
+@Options = sort($Validator->options("cfg"), "help|h|?");
 
 foreach my $option (@Options) {
     $option =~ s/^debug.*$/debug|d+/;
-    $option =~ s/^help/help|h|?/;
 }
 
 GetOptions(\%Config, @Options) or die;

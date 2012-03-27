@@ -2,8 +2,8 @@
 
 use strict;
 use warnings;
-use Config::Validator qw(string2hash hash2string is_true is_false is_regexp);
-use Test::More tests => 24;
+use Config::Validator qw(string2hash hash2string is_true is_false is_regexp listof);
+use Test::More tests => 29;
 
 our(%hash);
 
@@ -40,3 +40,9 @@ ok(!is_false([]), "is_false no");
 ok(is_regexp(qr//), "is_regexp yes");
 ok(is_regexp(qr/abc/imx), "is_regexp yes");
 ok(!is_regexp('qr/abc/imx'), "is_regexp no");
+
+is(join("+", listof(undef)), "", "listof(undef)");
+is(join("+", listof([])), "", "listof([])");
+is(join("+", listof(123)), "123", "listof(123)");
+is(join("+", listof([123])), "123", "listof([123])");
+is(join("+", listof([123,456])), "123+456", "listof(123)");
