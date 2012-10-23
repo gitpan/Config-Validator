@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Config-Validator
-version:            0.4
+version:            0.5
 abstract:           schema based configuration validation
 author:
     - Lionel Cons <lionel.cons@cern.ch>
@@ -11,6 +11,7 @@ configure_requires:
 build_requires:
     ExtUtils::MakeMaker:  0
 requires:
+    No::Worries:   0
     Scalar::Util:  0
     Test::More:    0
     URI::Escape:   0
