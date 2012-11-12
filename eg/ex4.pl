@@ -1,3 +1,4 @@
+#!/usr/bin/perl
 #
 # ex4: advanced use of Config::Validator with Getopt::Long and Config::General
 #
@@ -22,19 +23,24 @@ $Data::Dumper::Sortkeys = 1;
 
 $Validator = Config::Validator->new(
     svc => {
-	type => "struct",
-	fields => {
-	    port => { type => "integer", min => 0, max => 65535, optional => "true" },
-	    host => { type => "string", match => qr/^[\w\-\.]+$/ },
-	},
+        type => "struct",
+        fields => {
+            port => {
+                type => "integer",
+                min => 0,
+                max => 65535,
+                optional => "true",
+            },
+            host => { type => "string", match => qr/^[\w\-\.]+$/ },
+        },
     },
     cfg => {
-	type => "struct",
-	fields => {
-	    debug  => { type => "integer", optional => "true" },
-	    dst    => { type => "valid(svc)" },
-	    src    => { type => "valid(svc)" },
-	},
+        type => "struct",
+        fields => {
+            debug  => { type => "integer", optional => "true" },
+            dst    => { type => "valid(svc)" },
+            src    => { type => "valid(svc)" },
+        },
     },
 );
 

@@ -4,6 +4,7 @@ META.yml			Module meta-data (added by MakeMaker)
 Makefile.PL
 README
 VERSION
+eg/README
 eg/ex1.pl
 eg/ex2.pl
 eg/ex3.pl
@@ -19,5 +20,6 @@ t/1ref.t
 t/1simple.t
 t/1tree.t
 t/2schema.t
+t/2traverse.t
 t/3pod.t
 t/4podcov.t

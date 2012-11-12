@@ -7,7 +7,7 @@ my(%param, $emv, $name);
 %param = (
     NAME                   => 'Config::Validator',
     AUTHOR                 => 'Lionel Cons <lionel.cons@cern.ch>',
-    VERSION                => '0.5',
+    VERSION                => '0.6',
     ABSTRACT_FROM          => 'lib/Config/Validator.pm',
     LICENSE                => 'perl',
     PL_FILES               => {},
@@ -18,7 +18,7 @@ my(%param, $emv, $name);
         # optional: Test::Pod::Coverage
     },
     PREREQ_PM => {
-        'No::Worries'      => 0,
+        'No::Worries'      => '0.7',
         'Scalar::Util'     => 0,
         'URI::Escape'      => 0,
     },

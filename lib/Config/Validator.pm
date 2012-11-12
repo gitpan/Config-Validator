@@ -13,25 +13,15 @@
 package Config::Validator;
 use strict;
 use warnings;
-our $VERSION  = "0.5";
-our $REVISION = sprintf("%d.%02d", q$Revision: 1.20 $ =~ /(\d+)\.(\d+)/);
-
-#
-# export control
-#
-
-use Exporter;
-our(@ISA, @EXPORT, @EXPORT_OK);
-@ISA = qw(Exporter);
-@EXPORT = qw();
-@EXPORT_OK = qw(string2hash hash2string treeify treeval is_true is_false
-                is_regexp listof mutex reqall reqany);
+our $VERSION  = "0.6";
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.23 $ =~ /(\d+)\.(\d+)/);
 
 #
 # used modules
 #
 
 use No::Worries::Die qw(dief);
+use No::Worries::Export qw(export_control);
 use Scalar::Util qw(blessed reftype);
 use URI::Escape qw(uri_escape uri_unescape);
 
@@ -39,6 +29,7 @@ use URI::Escape qw(uri_escape uri_unescape);
 # constants
 #
 
+use constant RE_INTEGER => qr/^[\+\-]?\d+$/;
 use constant RE_NUMBER => qr/^[\+\-]?(?=\d|\.\d)\d*(\.\d*)?([Ee][\+\-]?\d+)?$/;
 
 #
@@ -73,15 +64,15 @@ sub _string ($) {
 sub _errfmt (@);
 sub _errfmt (@) {
     my(@errors) = @_;
-    my($string, $error, $tmp);
+    my($string, $tmp);
 
     return("") unless @errors;
     $string = shift(@errors);
-    foreach $error (@errors) {
-	$tmp = ref($error) ? _errfmt(@$error) : $error;
-	next unless length($tmp);
-	$tmp =~ s/^/  /mg;
-	$string .= "\n" . $tmp;
+    foreach my $error (@errors) {
+        $tmp = ref($error) ? _errfmt(@{ $error }) : $error;
+        next unless length($tmp);
+        $tmp =~ s/^/  /mg;
+        $string .= "\n" . $tmp;
     }
     return($string);
 }
@@ -110,7 +101,7 @@ sub listof ($) {
     my($thing) = @_;
 
     return() unless defined($thing);
-    return(@$thing) if ref($thing) eq "ARRAY";
+    return(@{ $thing }) if ref($thing) eq "ARRAY";
     return($thing);
 }
 
@@ -126,12 +117,14 @@ sub listof ($) {
 
 sub string2hash ($) {
     my($string) = @_;
-    my(%hash, $kv);
+    my(%hash);
 
-    foreach $kv (split(/\s+/, $string)) {
-	dief("invalid hash key=value: %s", $kv)
-	    unless $kv =~ /^([^\=]+)=(.*)$/;
-	$hash{uri_unescape($1)} = uri_unescape($2);
+    foreach my $kv (split(/\s+/, $string)) {
+        if ($kv =~ /^([^\=]+)=(.*)$/) {
+            $hash{uri_unescape($1)} = uri_unescape($2);
+        } else {
+            dief("invalid hash key=value: %s", $kv);
+        }
     }
     return(%hash) if wantarray();
     return(\%hash);
@@ -143,15 +136,15 @@ sub string2hash ($) {
 
 sub hash2string (@) {
     my(@args) = @_;
-    my($hash, $key, @kvs);
+    my($hash, @kvs);
 
     if (@args == 1 and ref($args[0]) eq "HASH") {
-	$hash = $args[0];
+        $hash = $args[0];
     } else {
-	$hash = { @args };
+        $hash = { @args };
     }
-    foreach $key (sort(keys(%$hash))) {
-	push(@kvs, uri_escape($key) . "=" . uri_escape($hash->{$key}));
+    foreach my $key (sort(keys(%{ $hash }))) {
+        push(@kvs, uri_escape($key) . "=" . uri_escape($hash->{$key}));
     }
     return(join(" ", @kvs));
 }
@@ -163,15 +156,16 @@ sub hash2string (@) {
 sub treeify ($);
 sub treeify ($) {
     my($hash) = @_;
-    my($key, $value);
 
-    foreach $key (grep(/-/, keys(%$hash))) {
-	dief("unexpected configuration name: %s", $key)
-	    unless $key =~ /^(\w+)-(.+)$/;
-	$hash->{$1}{$2} = delete($hash->{$key});
+    foreach my $key (grep(/-/, keys(%{ $hash }))) {
+        if ($key =~ /^(\w+)-(.+)$/) {
+            $hash->{$1}{$2} = delete($hash->{$key});
+        } else {
+            dief("unexpected configuration name: %s", $key);
+        }
     }
-    foreach $value (values(%$hash)) {
-	treeify($value) if ref($value) eq "HASH";
+    foreach my $value (values(%{ $hash })) {
+        treeify($value) if ref($value) eq "HASH";
     }
 }
 
@@ -184,9 +178,11 @@ sub treeval ($$) {
     my($hash, $name) = @_;
 
     return($hash->{$name}) if exists($hash->{$name});
-    return() unless $name =~ /^(\w+)-(.+)$/;
-    return() unless $hash->{$1};
-    return(treeval($hash->{$1}, $2));
+    if ($name =~ /^(\w+)-(.+)$/) {
+        return() unless $hash->{$1};
+        return(treeval($hash->{$1}, $2));
+    }
+    return();
 }
 
 #+++############################################################################
@@ -206,11 +202,12 @@ sub _check_type ($$$) {
     return() if $data =~ /^[a-z]+$/;
     return() if $data =~ /^(ref|isa)\(\*\)$/;
     return() if $data =~ /^(ref|isa)\([\w\:]+\)$/;
-    return(_check_type($valid, $schema, $2))
-	if $data =~ /^(list\??|table)\((.+)\)$/;
+    if ($data =~ /^(list\??|table)\((.+)\)$/) {
+        return(_check_type($valid, $schema, $2));
+    }
     if ($data =~ /^valid\((.+)\)$/) {
-	return() if $_Known->{$1};
-	return("unknown schema: $1");
+        return() if $_Known->{$1};
+        return("unknown schema: $1");
     }
     return("unexpected type: $data");
 }
@@ -222,32 +219,32 @@ sub _check_type ($$$) {
 $_BuiltIn->{type} = {
     type  => "string",
     match => qr/ ^
-	( anything        # really anything
-	| undef           # undef
-	| undefined       #   "
-	| defined         # not undef
-	| string          # any string
-	| boolean         # either 'true' or 'false'
-	| number          # any number
-	| integer         # any integer
-	| reference       # any reference, blessed or not
-	| ref\(\*\)       #   "
-	| blessed         # any blessed reference
-	| object          #   "
-	| isa\(\*\)       #   "
-	| unblessed       # any reference which is not blessed
-	| code            # a code reference (aka ref(CODE))
-	| regexp          # a regular expression (see is_regexp())
-	| list            # an homogeneous list
-	| list\(.+\)      # idem but with the given subtype
-	| list\?\(.+\)    # shortcut: list?(X) means either X or list(X)
-	| table           # an homogeneous table
-	| table\(.+\)     # idem but with the given subtype
-	| struct          # a structure, i.e. a table with known keys
-	| ref\(.+\)       # a reference of the given kind
-	| isa\(.+\)       # an object of the given kind
-	| valid\(.+\)     # something valid according to the named schema
-	) $ /x,
+        ( anything        # really anything
+        | undef           # undef
+        | undefined       #   "
+        | defined         # not undef
+        | string          # any string
+        | boolean         # either 'true' or 'false'
+        | number          # any number
+        | integer         # any integer
+        | reference       # any reference, blessed or not
+        | ref\(\*\)       #   "
+        | blessed         # any blessed reference
+        | object          #   "
+        | isa\(\*\)       #   "
+        | unblessed       # any reference which is not blessed
+        | code            # a code reference (aka ref(CODE))
+        | regexp          # a regular expression (see is_regexp())
+        | list            # an homogeneous list
+        | list\(.+\)      # idem but with the given subtype
+        | list\?\(.+\)    # shortcut: list?(X) means either X or list(X)
+        | table           # an homogeneous table
+        | table\(.+\)     # idem but with the given subtype
+        | struct          # a structure, i.e. a table with known keys
+        | ref\(.+\)       # a reference of the given kind
+        | isa\(.+\)       # an object of the given kind
+        | valid\(.+\)     # something valid according to the named schema
+        ) $ /x,
     check => \&_check_type,
 };
 
@@ -262,51 +259,49 @@ sub _check_schema ($$$) {
 
     $field = "min";
     goto unexpected if defined($data->{$field})
-	and not $data->{type} =~ /^(string|number|integer|list.*|table.*)$/;
+        and not $data->{type} =~ /^(string|number|integer|list.*|table.*)$/;
     $field = "max";
     goto unexpected if defined($data->{$field})
-	and not $data->{type} =~ /^(string|number|integer|list.*|table.*)$/;
+        and not $data->{type} =~ /^(string|number|integer|list.*|table.*)$/;
     $field = "match";
     goto unexpected if defined($data->{$field})
-	and not $data->{type} =~ /^(string|table.*)$/;
+        and not $data->{type} =~ /^(string|table.*)$/;
     $field = "subtype";
     if ($data->{type} =~ /^(list|table)$/) {
-	goto missing unless defined($data->{$field});
+        goto missing unless defined($data->{$field});
     } else {
-	goto unexpected if defined($data->{$field});
+        goto unexpected if defined($data->{$field});
     }
     $field = "fields";
     if ($data->{type} =~ /^(struct)$/) {
-	goto missing unless defined($data->{$field});
+        goto missing unless defined($data->{$field});
     } else {
-	goto unexpected if defined($data->{$field});
+        goto unexpected if defined($data->{$field});
     }
     return();
   unexpected:
     return(sprintf("unexpected schema field for type %s: %s",
-		   $data->{type}, $field));
+                   $data->{type}, $field));
   missing:
     return(sprintf("missing schema field for type %s: %s",
-		   $data->{type}, $field));
+                   $data->{type}, $field));
 }
 
 #
 # schema of a "schema"
 #
 
-# FIXME: add a description field?
-
 $_BuiltIn->{schema} = {
     type   => "struct",
     fields => {
-	type     => { type => "list?(valid(type))" },
-	subtype  => { type => "valid(schema)",        optional => "true" },
-	fields   => { type => "table(valid(schema))", optional => "true" },
-	optional => { type => "boolean",              optional => "true" },
-	min      => { type => "number",               optional => "true" },
-	max      => { type => "number",               optional => "true" },
-	match    => { type => "regexp",               optional => "true" },
-	check    => { type => "code",                 optional => "true" },
+        type     => { type => "list?(valid(type))" },
+        subtype  => { type => "valid(schema)",        optional => "true" },
+        fields   => { type => "table(valid(schema))", optional => "true" },
+        optional => { type => "boolean",              optional => "true" },
+        min      => { type => "number",               optional => "true" },
+        max      => { type => "number",               optional => "true" },
+        match    => { type => "regexp",               optional => "true" },
+        check    => { type => "code",                 optional => "true" },
     },
     check => \&_check_schema,
 };
@@ -324,7 +319,7 @@ $_BuiltIn->{schema} = {
 sub _options ($$$@);
 sub _options ($$$@) {
     my($valid, $schema, $type, @path) = @_;
-    my($field, @list);
+    my(@list);
 
     $type ||= $schema->{type};
     # terminal
@@ -334,21 +329,21 @@ sub _options ($$$@) {
     return(join("-", @path) . "!")  if $type eq "boolean";
     # assumed to come from strings
     return(join("-", @path) . "=s")
-	if $type =~ /^isa\(.+\)$/ or $type eq "table(string)";
+        if $type =~ /^isa\(.+\)$/ or $type eq "table(string)";
     # recursion
     if ($type =~ /^list\?\((.+)\)$/) {
-	return(map($_ . "\@", _options($valid, $schema, $1, @path)));
+        return(map($_ . "\@", _options($valid, $schema, $1, @path)));
     }
     if ($type =~ /^valid\((.+)\)$/) {
-	dief("options(): unknown schema: %s", $1) unless $valid->{$1};
-	return(_options($valid, $valid->{$1}, undef, @path));
+        dief("options(): unknown schema: %s", $1) unless $valid->{$1};
+        return(_options($valid, $valid->{$1}, undef, @path));
     }
     if ($type eq "struct") {
-	foreach $field (keys(%{ $schema->{fields} })) {
-	    push(@list, _options($valid, $schema->{fields}{$field},
-				 undef, @path, $field));
-	}
-	return(@list);
+        foreach my $field (keys(%{ $schema->{fields} })) {
+            push(@list, _options($valid, $schema->{fields}{$field},
+                                 undef, @path, $field));
+        }
+        return(@list);
     }
     # unsupported
     dief("options(): unsupported type: %s", $type);
@@ -360,12 +355,12 @@ sub _options ($$$@) {
 
 sub mutex ($@) {
     my($hash, @options) = @_;
-    my($opt, @set);
+    my(@list);
 
-    foreach $opt (@options) {
-	next unless defined(treeval($hash, $opt));
-	push(@set, $opt);
-	dief("options %s and %s are mutually exclusive", @set) if @set == 2;
+    foreach my $opt (@options) {
+        next unless defined(treeval($hash, $opt));
+        push(@list, $opt);
+        dief("options %s and %s are mutually exclusive", @list) if @list == 2;
     }
 }
 
@@ -375,13 +370,12 @@ sub mutex ($@) {
 
 sub reqall ($$@) {
     my($hash, $opt1, @options) = @_;
-    my($opt2);
 
     return unless not defined($opt1) or defined(treeval($hash, $opt1));
-    foreach $opt2 (@options) {
-	next if defined(treeval($hash, $opt2));
-	dief("option %s requires option %s", $opt1, $opt2) if defined($opt1);
-	dief("option %s is required", $opt2);
+    foreach my $opt2 (@options) {
+        next if defined(treeval($hash, $opt2));
+        dief("option %s requires option %s", $opt1, $opt2) if defined($opt1);
+        dief("option %s is required", $opt2);
     }
 }
 
@@ -391,20 +385,20 @@ sub reqall ($$@) {
 
 sub reqany ($$@) {
     my($hash, $opt1, @options) = @_;
-    my($opt2);
+    my($req);
 
     return unless not defined($opt1) or defined(treeval($hash, $opt1));
-    foreach $opt2 (@options) {
-	return if defined(treeval($hash, $opt2));
+    foreach my $opt2 (@options) {
+        return if defined(treeval($hash, $opt2));
     }
     if (@options <= 2) {
-	$opt2 = join(" or ", @options);
+        $req = join(" or ", @options);
     } else {
-	push(@options, join(" or ", splice(@options, -2)));
-	$opt2 = join(", ", @options);
+        push(@options, join(" or ", splice(@options, -2)));
+        $req = join(", ", @options);
     }
-    dief("option %s requires option %s", $opt1, $opt2) if defined($opt1);
-    dief("option %s is required", $opt2);
+    dief("option %s requires option %s", $opt1, $req) if defined($opt1);
+    dief("option %s is required", $req);
 }
 
 #+++############################################################################
@@ -417,10 +411,41 @@ sub reqany ($$@) {
 # traverse data
 #
 
+sub _traverse_list ($$$$$$@) {
+    my($callback, $valid, $schema, $reftype, $subtype, $data, @path) = @_;
+
+    return unless $reftype eq "ARRAY";
+    foreach my $val (@{ $data }) {
+        _traverse($callback, $valid, $schema, $subtype,
+                  $val, @path, 0);
+    }
+}
+
+sub _traverse_table ($$$$$$@) {
+    my($callback, $valid, $schema, $reftype, $subtype, $data, @path) = @_;
+
+    return unless $reftype eq "HASH";
+    foreach my $key (keys(%{ $data })) {
+        _traverse($callback, $valid, $schema, $subtype,
+                  $data->{$key}, @path, $key);
+    }
+}
+
+sub _traverse_struct ($$$$$$@) {
+    my($callback, $valid, $schema, $reftype, $subtype, $data, @path) = @_;
+
+    return unless $reftype eq "HASH";
+    foreach my $key (keys(%{ $schema->{fields} })) {
+        next unless exists($data->{$key});
+        _traverse($callback, $valid, $schema->{fields}{$key}, undef,
+                  $data->{$key}, @path, $key);
+    }
+}
+
 sub _traverse ($$$$$@);
 sub _traverse ($$$$$@) {
     my($callback, $valid, $schema, $type, $data, @path) = @_;
-    my($tmp, $reftype, $subtype, $index);
+    my($reftype, $subtype);
 
     # set the type if missing
     $type ||= $schema->{type};
@@ -433,57 +458,47 @@ sub _traverse ($$$$$@) {
     # recursion
     $reftype = reftype($data) || "";
     if ($type =~ /^valid\((.+)\)$/) {
-	dief("traverse(): unknown schema: %s", $1) unless $valid->{$1};
-	_traverse($callback, $valid, $valid->{$1}, undef, $_[4], @path);
-	return;
+        dief("traverse(): unknown schema: %s", $1) unless $valid->{$1};
+        _traverse($callback, $valid, $valid->{$1}, undef, $_[4], @path);
+        return;
     }
     if ($type eq "struct") {
-	return unless $reftype eq "HASH";
-	foreach $tmp (keys(%{ $schema->{fields} })) {
-	    next unless exists($data->{$tmp});
-	    _traverse($callback, $valid, $schema->{fields}{$tmp}, undef,
-		      $data->{$tmp}, @path, $tmp);
-	}
-	return;
+        _traverse_struct($callback, $valid, $schema,
+                         $reftype, $subtype, $data, @path);
+        return;
     }
     if ($type =~ /^list$/) {
-	$schema = $schema->{subtype};
-	goto list_recursion;
+        _traverse_list($callback, $valid, $schema->{subtype},
+                       $reftype, $subtype, $data, @path);
+        return;
     }
     if ($type =~ /^list\((.+)\)$/) {
-	$subtype = $1;
-	goto list_recursion;
+        _traverse_list($callback, $valid, $schema,
+                       $reftype, $1, $data, @path);
+        return;
     }
     if ($type =~ /^list\?\((.+)\)$/) {
-	$subtype = $1;
-	goto list_recursion if $reftype eq "ARRAY";
-	_traverse($callback, $valid, $schema, $subtype, $_[4], @path);
-	return;
+        if ($reftype eq "ARRAY") {
+            _traverse_list($callback, $valid, $schema,
+                           $reftype, $1, $data, @path);
+        } else {
+            _traverse($callback, $valid, $schema,
+                      $1, $_[4], @path);
+        }
+        return;
     }
     if ($type =~ /^table$/) {
-	$schema = $schema->{subtype};
-	goto table_recursion;
+        _traverse_table($callback, $valid, $schema->{subtype},
+                        $reftype, $subtype, $data, @path);
+        return;
     }
     if ($type =~ /^table\((.+)\)$/) {
-	$subtype = $1;
-	goto table_recursion;
+        _traverse_table($callback, $valid, $schema,
+                        $reftype, $1, $data, @path);
+        return;
     }
     # unsupported
     dief("traverse(): unsupported type: %s", $type);
-  list_recursion:
-    return unless $reftype eq "ARRAY";
-    $index = 0;
-    foreach $tmp (@$data) {
-	_traverse($callback, $valid, $schema, $subtype, $tmp, @path, $index);
-    }
-    return;
-  table_recursion:
-    return unless $reftype eq "HASH";
-    foreach $tmp (keys(%$data)) {
-	_traverse($callback, $valid, $schema, $subtype,
-		  $data->{$tmp}, @path, $tmp);
-    }
-    return;
 }
 
 #+++############################################################################
@@ -511,9 +526,9 @@ sub _validate_range ($$$$) {
     my($what, $value, $min, $max) = @_;
 
     return(sprintf("%s is not >= %s: %s", $what, $min, $value))
-	if defined($min) and not $value >= $min;
+        if defined($min) and not $value >= $min;
     return(sprintf("%s is not <= %s: %s", $what, $max, $value))
-	if defined($max) and not $value <= $max;
+        if defined($max) and not $value <= $max;
     return();
 }
 
@@ -523,23 +538,23 @@ sub _validate_range ($$$$) {
 
 sub _validate_list ($$$) {
     my($valid, $schema, $data) = @_;
-    my(@errors, $tmp, $index, $element);
+    my(@errors, $index, $element);
 
-    @errors = _validate_range("size", scalar(@$data),
-			      $schema->{min}, $schema->{max})
-	if defined($schema->{min}) or defined($schema->{max});
+    @errors = _validate_range("size", scalar(@{ $data }),
+                              $schema->{min}, $schema->{max})
+        if defined($schema->{min}) or defined($schema->{max});
     return(@errors) if @errors;
     $index = 0;
-    foreach $tmp (@$data) {
-	$element = $tmp; # preserved outside loop
-	@errors = _validate($valid, $schema->{subtype}, $element);
-	goto invalid if @errors;
-	$index++;
+    foreach my $tmp (@{ $data }) {
+        $element = $tmp; # preserved outside loop
+        @errors = _validate($valid, $schema->{subtype}, $element);
+        goto invalid if @errors;
+        $index++;
     }
     return();
   invalid:
     return(sprintf("invalid element %d: %s",
-		   $index, _string($element)), \@errors);
+                   $index, _string($element)), \@errors);
 }
 
 #
@@ -548,25 +563,25 @@ sub _validate_list ($$$) {
 
 sub _validate_table ($$$) {
     my($valid, $schema, $data) = @_;
-    my(@errors, $tmp, $key);
+    my(@errors, $key);
 
-    @errors = _validate_range("size", scalar(keys(%$data)),
-			      $schema->{min}, $schema->{max})
-	if defined($schema->{min}) or defined($schema->{max});
+    @errors = _validate_range("size", scalar(keys(%{ $data })),
+                              $schema->{min}, $schema->{max})
+        if defined($schema->{min}) or defined($schema->{max});
     return(@errors) if @errors;
-    foreach $tmp (keys(%$data)) {
-	$key = $tmp; # preserved outside loop
-	@errors = (sprintf("key does not match %s: %s",
-			   $schema->{match}, $key))
-	    if defined($schema->{match}) and not $key =~ $schema->{match};
-	goto invalid if @errors;
-	@errors = _validate($valid, $schema->{subtype}, $data->{$key});
-	goto invalid if @errors;
+    foreach my $tmp (keys(%{ $data })) {
+        $key = $tmp; # preserved outside loop
+        @errors = (sprintf("key does not match %s: %s",
+                           $schema->{match}, $key))
+            if defined($schema->{match}) and not $key =~ $schema->{match};
+        goto invalid if @errors;
+        @errors = _validate($valid, $schema->{subtype}, $data->{$key});
+        goto invalid if @errors;
     }
     return();
   invalid:
     return(sprintf("invalid element %s: %s",
-		   $key, _string($data->{$key})), \@errors);
+                   $key, _string($data->{$key})), \@errors);
 }
 
 #
@@ -575,27 +590,27 @@ sub _validate_table ($$$) {
 
 sub _validate_struct ($$$) {
     my($valid, $schema, $data) = @_;
-    my(@errors, $tmp, $key);
+    my(@errors, $key);
 
     # check the missing fields
-    foreach $tmp (keys(%{ $schema->{fields} })) {
-	$key = $tmp; # preserved outside loop
-	next if exists($data->{$key});
-	next if is_true($schema->{fields}{$key}{optional});
-	return(sprintf("missing field: %s", $key));
+    foreach my $tmp (keys(%{ $schema->{fields} })) {
+        $key = $tmp; # preserved outside loop
+        next if exists($data->{$key});
+        next if is_true($schema->{fields}{$key}{optional});
+        return(sprintf("missing field: %s", $key));
     }
     # check the existing fields
-    foreach $tmp (keys(%$data)) {
-	$key = $tmp; # preserved outside loop
-	return(sprintf("unexpected field: %s", $key))
-	    unless $schema->{fields}{$key};
-	@errors = _validate($valid, $schema->{fields}{$key}, $data->{$key});
-	goto invalid if @errors;
+    foreach my $tmp (keys(%{ $data })) {
+        $key = $tmp; # preserved outside loop
+        return(sprintf("unexpected field: %s", $key))
+            unless $schema->{fields}{$key};
+        @errors = _validate($valid, $schema->{fields}{$key}, $data->{$key});
+        goto invalid if @errors;
     }
     return();
   invalid:
     return(sprintf("invalid field %s: %s",
-		   $key, _string($data->{$key})), \@errors);
+                   $key, _string($data->{$key})), \@errors);
 }
 
 #
@@ -604,18 +619,104 @@ sub _validate_struct ($$$) {
 
 sub _validate_multiple ($$$@) {
     my($valid, $schema, $data, @types) = @_;
-    my($type, @errors, %tmpschema, @tmperrors);
+    my(@errors, %tmpschema, @tmperrors);
 
-    %tmpschema = %$schema;
-    foreach $type (@types) {
-	$tmpschema{type} = $type;
-	@tmperrors = _validate($valid, \%tmpschema, $data);
-	return() unless @tmperrors;
-	push(@errors, [ @tmperrors ]);
+    %tmpschema = %{ $schema };
+    foreach my $type (@types) {
+        $tmpschema{type} = $type;
+        @tmperrors = _validate($valid, \%tmpschema, $data);
+        return() unless @tmperrors;
+        push(@errors, [ @tmperrors ]);
     }
     return(sprintf("invalid data (none of the types could be validated): %s",
-		   _string($data)), @errors);
+                   _string($data)), @errors);
 }
+
+#
+# validate data (non-reference types)
+#
+
+sub _validate_data_nonref ($$) {
+    my($schema, $data) = @_;
+    my(@errors);
+
+    if ($schema->{type} eq "string") {
+        @errors = _validate_range("length", length($data),
+                                  $schema->{min}, $schema->{max})
+            if defined($schema->{min}) or defined($schema->{max});
+        @errors = (sprintf("value does not match %s: %s",
+                           $schema->{match}, $data))
+            if not @errors and defined($schema->{match})
+                and not $data =~ $schema->{match};
+    } elsif ($schema->{type} eq "boolean") {
+        goto invalid unless $data =~ /^(true|false)$/;
+    } elsif ($schema->{type} eq "number") {
+        goto invalid unless $data =~ RE_NUMBER;
+        @errors = _validate_range("value", $data,
+                                  $schema->{min}, $schema->{max})
+            if defined($schema->{min}) or defined($schema->{max});
+    } elsif ($schema->{type} eq "integer") {
+        goto invalid unless $data =~ RE_INTEGER;
+        @errors = _validate_range("value", $data,
+                                  $schema->{min}, $schema->{max})
+            if defined($schema->{min}) or defined($schema->{max});
+    } else {
+        return(sprintf("unexpected type: %s", $schema->{type}));
+    }
+    return() unless @errors;
+  invalid:
+    return(sprintf("invalid %s: %s", $schema->{type}, $data), \@errors);
+}
+
+#
+# validate data (reference types)
+#
+
+## no critic (ProhibitCascadingIfElse, ProhibitExcessComplexity)
+sub _validate_data_ref ($$$$) {
+    my($valid, $schema, $data, $reftype) = @_;
+    my(@errors, %tmpschema, $blessed);
+
+    $blessed = defined(blessed($data));
+    if ($schema->{type} =~ /^(blessed|object|isa\(\*\))$/) {
+        goto invalid unless $blessed;
+    } elsif ($schema->{type} eq "unblessed") {
+        goto invalid if $blessed;
+    } elsif ($schema->{type} eq "code") {
+        goto invalid unless $reftype eq "CODE";
+    } elsif ($schema->{type} eq "regexp") {
+        goto invalid unless is_regexp($data);
+    } elsif ($schema->{type} eq "list") {
+        goto invalid unless $reftype eq "ARRAY";
+        @errors = _validate_list($valid, $schema, $data);
+    } elsif ($schema->{type} =~ /^list\((.+)\)$/) {
+        goto invalid unless $reftype eq "ARRAY";
+        %tmpschema = %{ $schema };
+        $tmpschema{subtype} = { type => $1 };
+        @errors = _validate_list($valid, \%tmpschema, $data);
+    } elsif ($schema->{type} eq "table") {
+        goto invalid unless $reftype eq "HASH";
+        @errors = _validate_table($valid, $schema, $data);
+    } elsif ($schema->{type} =~ /^table\((.+)\)$/) {
+        goto invalid unless $reftype eq "HASH";
+        %tmpschema = %{ $schema };
+        $tmpschema{subtype} = { type => $1 };
+        @errors = _validate_table($valid, \%tmpschema, $data);
+    } elsif ($schema->{type} eq "struct") {
+        goto invalid unless $reftype eq "HASH";
+        @errors = _validate_struct($valid, $schema, $data);
+    } elsif ($schema->{type} =~ /^ref\((.+)\)$/) {
+        goto invalid unless $reftype eq $1;
+    } elsif ($schema->{type} =~ /^isa\((.+)\)$/) {
+        goto invalid unless $blessed and $data->isa($1);
+    } else {
+        return(sprintf("unexpected type: %s", $schema->{type}));
+    }
+    return() unless @errors;
+  invalid:
+    return(sprintf("invalid %s: %s", $schema->{type}, $data), \@errors);
+}
+## use critic
 
 #
 # validate something
@@ -628,103 +729,40 @@ sub _validate ($$$) {
 
     # check multiple types
     if (ref($schema->{type}) eq "ARRAY") {
-	return(_validate_multiple($valid, $schema, $data,
-				  @{ $schema->{type} }));
+        return(_validate_multiple($valid, $schema, $data,
+                                  @{ $schema->{type} }));
     }
     # check list?(X)
     if ($schema->{type} =~ /^list\?\((.+)\)$/) {
-	return(_validate_multiple($valid, $schema, $data, $1, "list($1)"));
+        return(_validate_multiple($valid, $schema, $data, $1, "list($1)"));
     }
     # check valid(X)
     if ($schema->{type} =~ /^valid\((.+)\)$/) {
-	return(sprintf("unexpected schema: %s", $1)) unless $valid->{$1};
-	return(_validate($valid, $valid->{$1}, $data));
+        return(sprintf("unexpected schema: %s", $1)) unless $valid->{$1};
+        return(_validate($valid, $valid->{$1}, $data));
     }
     # check anything
     goto good if $schema->{type} eq "anything";
     # check if defined
     if ($schema->{type} =~ /^(undef|undefined)$/) {
-	goto invalid if defined($data);
-	goto good;
+        goto invalid if defined($data);
+        goto good;
     }
     return(sprintf("invalid %s: <undef>", $schema->{type}))
-	unless defined($data);
+        unless defined($data);
     goto good if $schema->{type} eq "defined";
-    # check reference type (for non-reference)
     $reftype = reftype($data);
     if ($schema->{type} =~ /^(string|boolean|number|integer)$/) {
-	goto invalid if defined($reftype);
-	if ($schema->{type} eq "string") {
-	    @errors = _validate_range("length", length($data),
-				      $schema->{min}, $schema->{max})
-		if defined($schema->{min}) or defined($schema->{max});
-	    goto invalid if @errors;
-	    @errors = (sprintf("value does not match %s: %s",
-			       $schema->{match}, $data))
-		if defined($schema->{match}) and not $data =~ $schema->{match};
-	    goto invalid if @errors;
-	} elsif ($schema->{type} eq "boolean") {
-	    goto invalid unless $data =~ /^(true|false)$/;
-	} elsif ($schema->{type} eq "number") {
-	    goto invalid unless $data =~ RE_NUMBER;
-	    @errors = _validate_range("value", $data,
-				      $schema->{min}, $schema->{max})
-		if defined($schema->{min}) or defined($schema->{max});
-	    goto invalid if @errors;
-	} elsif ($schema->{type} eq "integer") {
-	    goto invalid unless $data =~ /^[\+\-]?\d+$/;
-	    @errors = _validate_range("value", $data,
-				      $schema->{min}, $schema->{max})
-		if defined($schema->{min}) or defined($schema->{max});
-	    goto invalid if @errors;
-	} else {
-	    return(sprintf("unexpected type: %s", $schema->{type}));
-	}
-	goto good;
-    }
-    # check reference type (for reference)
-    goto invalid unless defined($reftype);
-    goto good if $schema->{type} =~ /^(reference|ref\(\*\))$/;
-    $blessed = defined(blessed($data));
-    if ($schema->{type} =~ /^(blessed|object|isa\(\*\))$/) {
-	goto invalid unless $blessed;
-    } elsif ($schema->{type} eq "unblessed") {
-	goto invalid if $blessed;
-    } elsif ($schema->{type} eq "code") {
-	goto invalid unless $reftype eq "CODE";
-    } elsif ($schema->{type} eq "regexp") {
-	goto invalid unless is_regexp($data);
-    } elsif ($schema->{type} eq "list") {
-	goto invalid unless $reftype eq "ARRAY";
-	@errors = _validate_list($valid, $schema, $data);
-	goto invalid if @errors;
-    } elsif ($schema->{type} =~ /^list\((.+)\)$/) {
-	goto invalid unless $reftype eq "ARRAY";
-	%tmpschema = %$schema;
-	$tmpschema{subtype} = { type => $1 };
-	@errors = _validate_list($valid, \%tmpschema, $data);
-	goto invalid if @errors;
-    } elsif ($schema->{type} eq "table") {
-	goto invalid unless $reftype eq "HASH";
-	@errors = _validate_table($valid, $schema, $data);
-	goto invalid if @errors;
-    } elsif ($schema->{type} =~ /^table\((.+)\)$/) {
-	goto invalid unless $reftype eq "HASH";
-	%tmpschema = %$schema;
-	$tmpschema{subtype} = { type => $1 };
-	@errors = _validate_table($valid, \%tmpschema, $data);
-	goto invalid if @errors;
-    } elsif ($schema->{type} eq "struct") {
-	goto invalid unless $reftype eq "HASH";
-	@errors = _validate_struct($valid, $schema, $data);
-	goto invalid if @errors;
-    } elsif ($schema->{type} =~ /^ref\((.+)\)$/) {
-	goto invalid unless $reftype eq $1;
-    } elsif ($schema->{type} =~ /^isa\((.+)\)$/) {
-	goto invalid unless $blessed and $data->isa($1);
+        # check reference type (for non-reference)
+        goto invalid if defined($reftype);
+        @errors = _validate_data_nonref($schema, $data);
     } else {
-	return(sprintf("unexpected type: %s", $schema->{type}));
+        # check reference type (for reference)
+        goto invalid unless defined($reftype);
+        goto good if $schema->{type} =~ /^(reference|ref\(\*\))$/;
+        @errors = _validate_data_ref($valid, $schema, $data, $reftype);
     }
+    return(@errors) if @errors;
   good:
     @errors = $schema->{check}->($valid, $schema, $data) if $schema->{check};
     return() unless @errors;
@@ -749,19 +787,19 @@ sub new : method {
     $self = {};
     # find out which schema(s) to use
     if (@_ == 0) {
-	$self->{schema} = $_BuiltIn;
+        $self->{schema} = $_BuiltIn;
     } elsif (@_ == 1) {
-	$self->{schema}{""} = $_[0];
+        $self->{schema}{""} = $_[0];
     } elsif (@_ % 2 == 0) {
-	$self->{schema} = { @_ };
+        $self->{schema} = { @_ };
     } else {
-	dief("new(): unexpected number of arguments: %d", scalar(@_));
+        dief("new(): unexpected number of arguments: %d", scalar(@_));
     }
     # validate them
     {
-    	local $_Known = $self->{schema};
-    	@errors = _validate($_BuiltIn, { type => "table(valid(schema))" },
-			    $self->{schema});
+            local $_Known = $self->{schema};
+            @errors = _validate($_BuiltIn, { type => "table(valid(schema))" },
+                            $self->{schema});
     }
     dief("new(): invalid schema: %s", _errfmt(@errors)) if @errors;
     # so far so good!
@@ -779,16 +817,16 @@ sub options : method {
     $self = shift(@_);
     # find out which schema to convert to options
     if (@_ == 0) {
-	dief("options(): no default schema")
-	    unless $self->{schema}{""};
-	$schema = $self->{schema}{""};
+        dief("options(): no default schema")
+            unless $self->{schema}{""};
+        $schema = $self->{schema}{""};
     } elsif (@_ == 1) {
-	$schema = shift(@_);
-	dief("options(): unknown schema: %s", $schema)
-	    unless $self->{schema}{$schema};
-	$schema = $self->{schema}{$schema};
+        $schema = shift(@_);
+        dief("options(): unknown schema: %s", $schema)
+            unless $self->{schema}{$schema};
+        $schema = $self->{schema}{$schema};
     } else {
-	dief("options(): unexpected number of arguments: %d", scalar(@_));
+        dief("options(): unexpected number of arguments: %d", scalar(@_));
     }
     # convert to options
     return(_options($self->{schema}, $schema, undef));
@@ -804,23 +842,23 @@ sub validate : method {
     $self = shift(@_);
     # find out what to validate against
     if (@_ == 1) {
-	$data = shift(@_);
-	dief("validate(): no default schema")
-	    unless $self->{schema}{""};
-	$schema = $self->{schema}{""};
+        $data = shift(@_);
+        dief("validate(): no default schema")
+            unless $self->{schema}{""};
+        $schema = $self->{schema}{""};
     } elsif (@_ == 2) {
-	$data = shift(@_);
-	$schema = shift(@_);
-	dief("validate(): unknown schema: %s", $schema)
-	    unless $self->{schema}{$schema};
-	$schema = $self->{schema}{$schema};
+        $data = shift(@_);
+        $schema = shift(@_);
+        dief("validate(): unknown schema: %s", $schema)
+            unless $self->{schema}{$schema};
+        $schema = $self->{schema}{$schema};
     } else {
-	dief("validate(): unexpected number of arguments: %d", scalar(@_));
+        dief("validate(): unexpected number of arguments: %d", scalar(@_));
     }
     # validate data
     {
-	local $_Known = $self->{schema};
-	@errors = _validate($self->{schema}, $schema, $data);
+        local $_Known = $self->{schema};
+        @errors = _validate($self->{schema}, $schema, $data);
     }
     dief("validate(): %s", _errfmt(@errors)) if @errors;
 }
@@ -835,23 +873,38 @@ sub traverse : method {
     $self = shift(@_);
     # find out what to traverse
     if (@_ == 2) {
-	$callback = shift(@_);
-	$data = shift(@_);
-	dief("traverse(): no default schema")
-	    unless $self->{schema}{""};
-	$schema = $self->{schema}{""};
+        $callback = shift(@_);
+        $data = shift(@_);
+        dief("traverse(): no default schema")
+            unless $self->{schema}{""};
+        $schema = $self->{schema}{""};
     } elsif (@_ == 3) {
-	$callback = shift(@_);
-	$data = shift(@_);
-	$schema = shift(@_);
-	dief("traverse(): unknown schema: %s", $schema)
-	    unless $self->{schema}{$schema};
-	$schema = $self->{schema}{$schema};
+        $callback = shift(@_);
+        $data = shift(@_);
+        $schema = shift(@_);
+        dief("traverse(): unknown schema: %s", $schema)
+            unless $self->{schema}{$schema};
+        $schema = $self->{schema}{$schema};
     } else {
-	dief("traverse(): unexpected number of arguments: %d", scalar(@_));
+        dief("traverse(): unexpected number of arguments: %d", scalar(@_));
     }
     # traverse data
     _traverse($callback, $self->{schema}, $schema, undef, $data);
+}
+
+#
+# export control
+#
+
+sub import : method {
+    my($pkg, %exported);
+
+    $pkg = shift(@_);
+    foreach my $name (qw(string2hash hash2string treeify treeval is_true
+                         is_false is_regexp listof mutex reqall reqany)) {
+        $exported{$name}++;
+    }
+    export_control(scalar(caller()), $pkg, \%exported, @_);
 }
 
 1;

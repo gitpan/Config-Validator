@@ -1,3 +1,4 @@
+#!/usr/bin/perl
 #
 # ex5: use of Config::Validator's boolean with Getopt::Long and Config::General
 #
@@ -17,15 +18,15 @@ use Getopt::Long qw(GetOptions);
 
 our($Validator, @Options, %Config, @Tmp, %Tmp);
 
-sub clean {
+sub clean ($$$$@) {
     my($valid, $schema, $type, $data, @path) = @_;
 
     return(1) unless $type eq "boolean";
     return(0) if not defined($data) or is_true($data) or is_false($data);
     if ($data eq "0") {
-	$_[3] = "false";
+        $_[3] = "false";
     } elsif ($data eq "1") {
-	$_[3] = "true";
+        $_[3] = "true";
     }
     return(0);
 }
@@ -36,9 +37,9 @@ $Data::Dumper::Sortkeys = 1;
 $Validator = Config::Validator->new({
     type => "struct",
     fields => {
-	flag1 => { type => "boolean", optional => "true" },
-	flag2 => { type => "boolean", optional => "true" },
-	flag3 => { type => "boolean", optional => "true" },
+        flag1 => { type => "boolean", optional => "true" },
+        flag2 => { type => "boolean", optional => "true" },
+        flag3 => { type => "boolean", optional => "true" },
     },
 });
 

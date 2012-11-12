@@ -1,3 +1,4 @@
+#!/usr/bin/perl
 #
 # ex3: simple use of Config::Validator with Getopt::Long and Config::General
 #
@@ -25,11 +26,21 @@ $Data::Dumper::Sortkeys = 1;
 $Validator = Config::Validator->new({
     type => "struct",
     fields => {
-	"debug"    => { type => "integer", optional => "true" },
-	"dst-port" => { type => "integer", min => 0, max => 65535, optional => "true" },
-	"dst-host" => { type => "string", match => qr/^[\w\-\.]+$/ },
-	"src-port" => { type => "integer", min => 0, max => 65535, optional => "true" },
-	"src-host" => { type => "string", match => qr/^[\w\-\.]+$/ },
+        "debug" => { type => "integer", optional => "true" },
+        "dst-port" => {
+            type => "integer",
+            min => 0,
+            max => 65535,
+            optional => "true",
+        },
+        "dst-host" => { type => "string", match => qr/^[\w\-\.]+$/ },
+        "src-port" => {
+            type => "integer",
+            min => 0,
+            max => 65535,
+            optional => "true",
+        },
+        "src-host" => { type => "string", match => qr/^[\w\-\.]+$/ },
     },
 });
 

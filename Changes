@@ -1,5 +1,8 @@
 Revision history for Config-Validator:
 
+0.6	Mon Nov 12 2012
+	* Cleanup code to please Perl::Critic.
+
 0.5	Tue Oct 23 2012
 	* Now using No::Worries.
 
