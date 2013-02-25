@@ -13,8 +13,8 @@
 package Config::Validator;
 use strict;
 use warnings;
-our $VERSION  = "0.6";
-our $REVISION = sprintf("%d.%02d", q$Revision: 1.23 $ =~ /(\d+)\.(\d+)/);
+our $VERSION  = "1.0";
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.25 $ =~ /(\d+)\.(\d+)/);
 
 #
 # used modules
@@ -952,9 +952,9 @@ Config::Validator - schema based configuration validation
 
 This module allows to perform schema based configuration validation.
 
-The idea is to define in a schema what a valid data is. This schema
-can be used to create a validator object that can in turn be used to
-make sure that some data indeed conforms to the schema.
+The idea is to define in a schema what valid data is. This schema can
+be used to create a validator object that can in turn be used to make
+sure that some data indeed conforms to the schema.
 
 Although the primary focus is on "configuration" (for instance as
 provided by modules like L<Config::General>) and, to a lesser extent,
@@ -1384,4 +1384,4 @@ some of the possibilities of this module.
 
 Lionel Cons L<http://cern.ch/lionel.cons>
 
-Copyright CERN 2012
+Copyright (C) CERN 2012-2013

@@ -1,5 +1,9 @@
 Revision history for Config-Validator:
 
+1.0	Mon Feb 25 2013
+	* Promoted to 1.0 after successful testing.
+	* The API is now stable.
+
 0.6	Mon Nov 12 2012
 	* Cleanup code to please Perl::Critic.
 
