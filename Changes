@@ -1,5 +1,8 @@
 Revision history for Config-Validator:
 
+1.0_1	Tue Nov 19 2013 (developer version)
+	* Added more built-in types: hostname, ipv4, ipv6 and size.
+
 1.0	Mon Feb 25 2013
 	* Promoted to 1.0 after successful testing.
 	* The API is now stable.

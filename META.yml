@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Config-Validator
-version:            1.0
+version:            1.0_1
 abstract:           schema based configuration validation
 author:
     - Lionel Cons <lionel.cons@cern.ch>

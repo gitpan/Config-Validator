@@ -13,8 +13,8 @@
 package Config::Validator;
 use strict;
 use warnings;
-our $VERSION  = "1.0";
-our $REVISION = sprintf("%d.%02d", q$Revision: 1.25 $ =~ /(\d+)\.(\d+)/);
+our $VERSION  = "1.0_1";
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.33 $ =~ /(\d+)\.(\d+)/);
 
 #
 # used modules
@@ -26,20 +26,71 @@ use Scalar::Util qw(blessed reftype);
 use URI::Escape qw(uri_escape uri_unescape);
 
 #
-# constants
-#
-
-use constant RE_INTEGER => qr/^[\+\-]?\d+$/;
-use constant RE_NUMBER => qr/^[\+\-]?(?=\d|\.\d)\d*(\.\d*)?([Ee][\+\-]?\d+)?$/;
-
-#
 # global variables
 #
 
 our(
-    $_Known,     # hash of known schemas used by _check_type()
-    $_BuiltIn,   # hash of built-in schemas used to validate schemas
+    $_Known,     # hash reference of known schemas used by _check_type()
+    $_BuiltIn,   # hash reference of built-in schemas used to validate schemas
+    %_RE,        # hash of commonly used regular expressions
+    %_Scale,     # hash of size suffixes
 );
+
+%_Scale = (
+     b => 1,
+    kb => 1024,
+    mb => 1024 * 1024,
+    gb => 1024 * 1024 * 1024,
+    tb => 1024 * 1024 * 1024 * 1024,
+);
+
+#+++############################################################################
+#                                                                              #
+# regular expressions                                                          #
+#                                                                              #
+#---############################################################################
+
+sub _init_regexp () {
+    my($label, $byte, $hex4, $ipv4, $ipv6, @tail);
+
+    # simple ones
+    $_RE{boolean} = q/true|false/;
+    $_RE{integer} = q/[\+\-]?\d+/;
+    $_RE{number} = q/[\+\-]?(?=\d|\.\d)\d*(?:\.\d*)?(?:[Ee][\+\-]?\d+)?/;
+    $_RE{size} = q/\d+[bB]?|(?:\d+\.)?\d+[kKmMgGtT][bB]/;
+    # complex ones
+    $label = q/[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?/;
+    $byte = q/25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d/;
+    $hex4 = q/[0-9a-fA-F]{1,4}/;
+    $ipv4 = qq/(($byte)\\.){3}($byte)/;
+    @tail = (
+        ":",
+        "(:($hex4)?|($ipv4))",
+        ":(($ipv4)|$hex4(:$hex4)?|)",
+        "(:($ipv4)|:$hex4(:($ipv4)|(:$hex4){0,2})|:)",
+        "((:$hex4){0,2}(:($ipv4)|(:$hex4){1,2})|:)",
+        "((:$hex4){0,3}(:($ipv4)|(:$hex4){1,2})|:)",
+        "((:$hex4){0,4}(:($ipv4)|(:$hex4){1,2})|:)",
+    );
+    $ipv6 = $hex4;
+    foreach my $tail (@tail) {
+        $ipv6 = "$hex4:($ipv6|$tail)";
+    }
+    $ipv6 = qq/:(:$hex4){0,5}((:$hex4){1,2}|:$ipv4)|$ipv6/;
+    $_RE{hostname} = qq/($label\\.)*$label/;
+    $_RE{ipv4} = $ipv4;
+    $_RE{ipv6} = $ipv6;
+    # improve some of them
+    foreach my $name (qw(hostname ipv4 ipv6)) {
+        $_RE{$name} =~ s/\(/(?:/g;
+    }
+    # compile them all
+    foreach my $name (keys(%_RE)) {
+        $_RE{$name} = qr/^(?:$_RE{$name})$/;
+    }
+}
+
+_init_regexp();
 
 #+++############################################################################
 #                                                                              #
@@ -78,18 +129,34 @@ sub _errfmt (@) {
 }
 
 #
+# expand a size string and return the corresponding number of bytes
+#
+
+sub expand_size ($) {
+    my($value) = @_;
+
+    if ($value =~ /^(.+?)([kmgt]?b)$/i) {
+        return(int($1 * $_Scale{lc($2)} + 0.5));
+    } else {
+        return($value);
+    }
+}
+
+#
 # test if a boolean is true or false
 #
 
 sub is_true ($) {
     my($value) = @_;
 
+    return(undef) unless defined($value);
     return($value and not ref($value) and $value eq "true");
 }
 
 sub is_false ($) {
     my($value) = @_;
 
+    return(undef) unless defined($value);
     return($value and not ref($value) and $value eq "false");
 }
 
@@ -199,7 +266,7 @@ sub _check_type ($$$);
 sub _check_type ($$$) {
     my($valid, $schema, $data) = @_;
 
-    return() if $data =~ /^[a-z]+$/;
+    return() if $data =~ /^[a-z46]+$/;
     return() if $data =~ /^(ref|isa)\(\*\)$/;
     return() if $data =~ /^(ref|isa)\([\w\:]+\)$/;
     if ($data =~ /^(list\??|table)\((.+)\)$/) {
@@ -227,6 +294,10 @@ $_BuiltIn->{type} = {
         | boolean         # either 'true' or 'false'
         | number          # any number
         | integer         # any integer
+        | size            # any size, i.e. number with optional byte-suffix
+        | hostname        # host name
+        | ipv4            # IPv4 address
+        | ipv6            # IPv6 address
         | reference       # any reference, blessed or not
         | ref\(\*\)       #   "
         | blessed         # any blessed reference
@@ -452,9 +523,9 @@ sub _traverse ($$$$$@) {
     # call the callback and stop unless we are told to continue
     return unless $callback->($valid, $schema, $type, $_[4], @path);
     # terminal
-    return if $type =~ /^(anything|string|boolean|number|integer|code)$/;
+    return if $type =~ /^(boolean|number|integer|size|hostname|ipv[46])$/;
     return if $type =~ /^(undef|undefined|defined|blessed|unblessed)$/;
-    return if $type =~ /^(regexp|object|reference)$/;
+    return if $type =~ /^(anything|string|regexp|object|reference|code)$/;
     # recursion
     $reftype = reftype($data) || "";
     if ($type =~ /^valid\((.+)\)$/) {
@@ -638,34 +709,35 @@ sub _validate_multiple ($$$@) {
 
 sub _validate_data_nonref ($$) {
     my($schema, $data) = @_;
-    my(@errors);
+    my($type, @errors);
 
-    if ($schema->{type} eq "string") {
-        @errors = _validate_range("length", length($data),
-                                  $schema->{min}, $schema->{max})
+    $type = $schema->{type};
+    if ($type eq "string") {
+        @errors = _validate_range
+            ("length", length($data), $schema->{min}, $schema->{max})
             if defined($schema->{min}) or defined($schema->{max});
         @errors = (sprintf("value does not match %s: %s",
                            $schema->{match}, $data))
             if not @errors and defined($schema->{match})
                 and not $data =~ $schema->{match};
-    } elsif ($schema->{type} eq "boolean") {
-        goto invalid unless $data =~ /^(true|false)$/;
-    } elsif ($schema->{type} eq "number") {
-        goto invalid unless $data =~ RE_NUMBER;
-        @errors = _validate_range("value", $data,
-                                  $schema->{min}, $schema->{max})
-            if defined($schema->{min}) or defined($schema->{max});
-    } elsif ($schema->{type} eq "integer") {
-        goto invalid unless $data =~ RE_INTEGER;
-        @errors = _validate_range("value", $data,
-                                  $schema->{min}, $schema->{max})
+    } elsif ($type =~ /^(boolean|hostname|ipv[46])$/) {
+        goto invalid unless $data =~ $_RE{$type};
+        # additional hard-coded checks for host names...
+        if ($type eq "hostname") {
+            goto invalid if ".$data." =~ /\.\d+\./;
+            @errors = _validate_range("length", length($data), 1, 255);
+        }
+    } elsif ($type =~ /^(integer|number|size)$/) {
+        goto invalid unless $data =~ $_RE{$type};
+        @errors = _validate_range
+            ("value", $data, $schema->{min}, $schema->{max})
             if defined($schema->{min}) or defined($schema->{max});
     } else {
-        return(sprintf("unexpected type: %s", $schema->{type}));
+        return(sprintf("unexpected type: %s", $type));
     }
     return() unless @errors;
   invalid:
-    return(sprintf("invalid %s: %s", $schema->{type}, $data), \@errors);
+    return(sprintf("invalid %s: %s", $type, $data), \@errors);
 }
 
 #
@@ -725,41 +797,41 @@ sub _validate_data_ref ($$$$) {
 sub _validate ($$$);
 sub _validate ($$$) {
     my($valid, $schema, $data) = @_;
-    my(@errors, $reftype, $blessed, %tmpschema);
+    my($type, @errors, $reftype, $blessed, %tmpschema);
 
+    $type = $schema->{type};
     # check multiple types
-    if (ref($schema->{type}) eq "ARRAY") {
-        return(_validate_multiple($valid, $schema, $data,
-                                  @{ $schema->{type} }));
+    if (ref($type) eq "ARRAY") {
+        return(_validate_multiple($valid, $schema, $data, @{ $type }));
     }
     # check list?(X)
-    if ($schema->{type} =~ /^list\?\((.+)\)$/) {
+    if ($type =~ /^list\?\((.+)\)$/) {
         return(_validate_multiple($valid, $schema, $data, $1, "list($1)"));
     }
     # check valid(X)
-    if ($schema->{type} =~ /^valid\((.+)\)$/) {
+    if ($type =~ /^valid\((.+)\)$/) {
         return(sprintf("unexpected schema: %s", $1)) unless $valid->{$1};
         return(_validate($valid, $valid->{$1}, $data));
     }
     # check anything
-    goto good if $schema->{type} eq "anything";
+    goto good if $type eq "anything";
     # check if defined
-    if ($schema->{type} =~ /^(undef|undefined)$/) {
+    if ($type =~ /^(undef|undefined)$/) {
         goto invalid if defined($data);
         goto good;
     }
-    return(sprintf("invalid %s: <undef>", $schema->{type}))
+    return(sprintf("invalid %s: <undef>", $type))
         unless defined($data);
-    goto good if $schema->{type} eq "defined";
+    goto good if $type eq "defined";
     $reftype = reftype($data);
-    if ($schema->{type} =~ /^(string|boolean|number|integer)$/) {
+    if ($type =~ /^(string|boolean|number|integer|size|hostname|ipv[46])$/) {
         # check reference type (for non-reference)
         goto invalid if defined($reftype);
         @errors = _validate_data_nonref($schema, $data);
     } else {
         # check reference type (for reference)
         goto invalid unless defined($reftype);
-        goto good if $schema->{type} =~ /^(reference|ref\(\*\))$/;
+        goto good if $type =~ /^(reference|ref\(\*\))$/;
         @errors = _validate_data_ref($valid, $schema, $data, $reftype);
     }
     return(@errors) if @errors;
@@ -767,7 +839,7 @@ sub _validate ($$$) {
     @errors = $schema->{check}->($valid, $schema, $data) if $schema->{check};
     return() unless @errors;
   invalid:
-    return(sprintf("invalid %s: %s", $schema->{type}, $data), \@errors);
+    return(sprintf("invalid %s: %s", $type, $data), \@errors);
 }
 
 #+++############################################################################
@@ -900,8 +972,9 @@ sub import : method {
     my($pkg, %exported);
 
     $pkg = shift(@_);
-    foreach my $name (qw(string2hash hash2string treeify treeval is_true
-                         is_false is_regexp listof mutex reqall reqany)) {
+    foreach my $name (qw(string2hash hash2string treeify treeval expand_size
+                         is_true is_false is_regexp listof
+                         mutex reqall reqany)) {
         $exported{$name}++;
     }
     export_control(scalar(caller()), $pkg, \%exported, @_);
@@ -1005,6 +1078,11 @@ check if the given scalar is the boolean C<false>
 =item is_regexp(SCALAR)
 
 check if the given scalar is a compiled regular expression
+
+=item expand_size(STRING)
+
+convert a string representing a size (such as "1.5kB") into the corresponding
+integer (such as "1536")
 
 =item listof(SCALAR)
 
@@ -1165,6 +1243,22 @@ any number (this is tested using a regular expression)
 =item integer
 
 any integer (this is tested using a regular expression)
+
+=item size
+
+any size (integer with optional fractional part and optional byte-suffix)
+
+=item hostname
+
+any host name (as per RFC 1123)
+
+=item ipv4
+
+any IPv4 address (this is tested using a regular expression)
+
+=item ipv6
+
+any IPv6 address (this is tested using a regular expression)
 
 =item reference
 
