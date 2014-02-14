@@ -13,8 +13,8 @@
 package Config::Validator;
 use strict;
 use warnings;
-our $VERSION  = "1.1";
-our $REVISION = sprintf("%d.%02d", q$Revision: 1.33 $ =~ /(\d+)\.(\d+)/);
+our $VERSION  = "1.2";
+our $REVISION = sprintf("%d.%02d", q$Revision: 1.35 $ =~ /(\d+)\.(\d+)/);
 
 #
 # used modules
@@ -30,13 +30,22 @@ use URI::Escape qw(uri_escape uri_unescape);
 #
 
 our(
-    $_Known,     # hash reference of known schemas used by _check_type()
-    $_BuiltIn,   # hash reference of built-in schemas used to validate schemas
-    %_RE,        # hash of commonly used regular expressions
-    %_Scale,     # hash of size suffixes
+    $_Known,         # hash reference of known schemas used by _check_type()
+    $_BuiltIn,       # hash reference of built-in schemas (to validate schemas)
+    %_RE,            # hash of commonly used regular expressions
+    %_DurationScale, # hash of duration suffixes
+    %_SizeScale,     # hash of size suffixes
 );
 
-%_Scale = (
+%_DurationScale = (
+    ms => 0.001,
+     s => 1,
+     m => 60,
+     h => 60 * 60,
+     d => 60 * 60 * 24,
+);
+
+%_SizeScale = (
      b => 1,
     kb => 1024,
     mb => 1024 * 1024,
@@ -57,6 +66,7 @@ sub _init_regexp () {
     $_RE{boolean} = q/true|false/;
     $_RE{integer} = q/[\+\-]?\d+/;
     $_RE{number} = q/[\+\-]?(?=\d|\.\d)\d*(?:\.\d*)?(?:[Ee][\+\-]?\d+)?/;
+    $_RE{duration} = q/(?:\d+(?:ms|s|m|h|d))+|\d+/;
     $_RE{size} = q/\d+[bB]?|(?:\d+\.)?\d+[kKmMgGtT][bB]/;
     # complex ones
     $label = q/[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?/;
@@ -129,6 +139,25 @@ sub _errfmt (@) {
 }
 
 #
+# expand a duration string and return the corresponding number of seconds
+#
+
+sub expand_duration ($) {
+    my($value) = @_;
+    my($result);
+
+    if ($value =~ /^(\d+(ms|s|m|h|d))+$/) {
+        $result = 0;
+        while ($value =~ /(\d+)(ms|s|m|h|d)/g) {
+            $result += $1 * $_DurationScale{$2};
+        }
+    } else {
+        $result = $value;
+    }
+    return($result);
+}
+
+#
 # expand a size string and return the corresponding number of bytes
 #
 
@@ -136,7 +165,7 @@ sub expand_size ($) {
     my($value) = @_;
 
     if ($value =~ /^(.+?)([kmgt]?b)$/i) {
-        return(int($1 * $_Scale{lc($2)} + 0.5));
+        return(int($1 * $_SizeScale{lc($2)} + 0.5));
     } else {
         return($value);
     }
@@ -294,6 +323,7 @@ $_BuiltIn->{type} = {
         | boolean         # either 'true' or 'false'
         | number          # any number
         | integer         # any integer
+        | duration        # any duration, i.e. numbers with hms suffixes
         | size            # any size, i.e. number with optional byte-suffix
         | hostname        # host name
         | ipv4            # IPv4 address
@@ -523,7 +553,8 @@ sub _traverse ($$$$$@) {
     # call the callback and stop unless we are told to continue
     return unless $callback->($valid, $schema, $type, $_[4], @path);
     # terminal
-    return if $type =~ /^(boolean|number|integer|size|hostname|ipv[46])$/;
+    return if $type =~ /^(boolean|number|integer)$/;
+    return if $type =~ /^(duration|size|hostname|ipv[46])$/;
     return if $type =~ /^(undef|undefined|defined|blessed|unblessed)$/;
     return if $type =~ /^(anything|string|regexp|object|reference|code)$/;
     # recursion
@@ -727,7 +758,7 @@ sub _validate_data_nonref ($$) {
             goto invalid if ".$data." =~ /\.\d+\./;
             @errors = _validate_range("length", length($data), 1, 255);
         }
-    } elsif ($type =~ /^(integer|number|size)$/) {
+    } elsif ($type =~ /^(integer|number|duration|size)$/) {
         goto invalid unless $data =~ $_RE{$type};
         @errors = _validate_range
             ("value", $data, $schema->{min}, $schema->{max})
@@ -824,7 +855,8 @@ sub _validate ($$$) {
         unless defined($data);
     goto good if $type eq "defined";
     $reftype = reftype($data);
-    if ($type =~ /^(string|boolean|number|integer|size|hostname|ipv[46])$/) {
+    if ($type =~ /^(string|boolean|number|integer)$/ or
+        $type =~ /^(duration|size|hostname|ipv[46])$/) {
         # check reference type (for non-reference)
         goto invalid if defined($reftype);
         @errors = _validate_data_nonref($schema, $data);
@@ -972,7 +1004,8 @@ sub import : method {
     my($pkg, %exported);
 
     $pkg = shift(@_);
-    foreach my $name (qw(string2hash hash2string treeify treeval expand_size
+    foreach my $name (qw(string2hash hash2string treeify treeval
+                         expand_duration expand_size
                          is_true is_false is_regexp listof
                          mutex reqall reqany)) {
         $exported{$name}++;
@@ -1025,14 +1058,14 @@ Config::Validator - schema based configuration validation
 
 This module allows to perform schema based configuration validation.
 
-The idea is to define in a schema what valid data is. This schema can
-be used to create a validator object that can in turn be used to make
-sure that some data indeed conforms to the schema.
+The idea is to define in a schema what valid data is. This schema can be used
+to create a validator object that can in turn be used to make sure that some
+data indeed conforms to the schema.
 
-Although the primary focus is on "configuration" (for instance as
-provided by modules like L<Config::General>) and, to a lesser extent,
-"options" (for instance as provided by modules like L<Getopt::Long>),
-this module can in fact validate any data structure.
+Although the primary focus is on "configuration" (for instance as provided by
+modules like L<Config::General>) and, to a lesser extent, "options" (for
+instance as provided by modules like L<Getopt::Long>), this module can in fact
+validate any data structure.
 
 =head1 METHODS
 
@@ -1046,18 +1079,18 @@ return a new Config::Validator object (class method)
 
 =item options([NAME])
 
-convert the named schema (or the default schema if the name is not
-given) to a list of L<Getopt::Long> compatible options
+convert the named schema (or the default schema if the name is not given) to a
+list of L<Getopt::Long> compatible options
 
 =item validate(DATA[, NAME])
 
-validate the given data using the named schema (or the default schema
-if the name is not given)
+validate the given data using the named schema (or the default schema if the
+name is not given)
 
 =item traverse(CALLBACK, DATA[, NAME])
 
-traverse the given data using the named schema (or the default schema
-if the name is not given) and call the given CALLBACK on each node
+traverse the given data using the named schema (or the default schema if the
+name is not given) and call the given CALLBACK on each node
 
 =back
 
@@ -1079,6 +1112,11 @@ check if the given scalar is the boolean C<false>
 
 check if the given scalar is a compiled regular expression
 
+=item expand_duration(STRING)
+
+convert a string representing a duration (such as "1h10m12s") into the
+corresponding number of seconds (such as "4212")
+
 =item expand_size(STRING)
 
 convert a string representing a size (such as "1.5kB") into the corresponding
@@ -1086,28 +1124,27 @@ integer (such as "1536")
 
 =item listof(SCALAR)
 
-return the given scalar as a list, dereferencing it if it is a list
-reference (this is very useful with the C<list?(X)> type)
+return the given scalar as a list, dereferencing it if it is a list reference
+(this is very useful with the C<list?(X)> type)
 
 =item string2hash(STRING)
 
-convert a string of space separated key=value pairs into a hash
-or hash reference
+convert a string of space separated key=value pairs into a hash or hash
+reference
 
 =item hash2string(HASH)
 
-convert a hash or hash reference into a string of space separated
-key=value pairs
+convert a hash or hash reference into a string of space separated key=value
+pairs
 
 =item treeify(HASH)
 
-modify (in place) a hash reference to turn it into a tree, using the
-dash character to split keys
+modify (in place) a hash reference to turn it into a tree, using the dash
+character to split keys
 
 =item treeval(HASH, NAME)
 
-return the value of the given option (e.g. C<foo-bar>) in a treeified
-hash
+return the value of the given option (e.g. C<foo-bar>) in a treeified hash
 
 =item mutex(HASH, NAME...)
 
@@ -1125,16 +1162,16 @@ if the first option is set, one at least of the others is required
 
 =head1 SCHEMAS
 
-A schema is simply a structure (i.e. a hash reference) with the
-following fields (all of them being optional except the first one):
+A schema is simply a structure (i.e. a hash reference) with the following
+fields (all of them being optional except the first one):
 
 =over
 
 =item type
 
 the type of the thing to validate (see the L</"TYPES"> section for the
-complete list); this can also be a list of possible types
-(e.g. C<integer> or C<undef>)
+complete list); this can also be a list of possible types (e.g. C<integer> or
+C<undef>)
 
 =item subtype
 
@@ -1142,8 +1179,8 @@ for an homogeneous list or table, the schema of its elements
 
 =item fields
 
-for a structure, a table of the allowed fields, in the form:
-field name =E<gt> corresponding schema
+for a structure, a table of the allowed fields, in the form: field name =E<gt>
+corresponding schema
 
 =item optional
 
@@ -1151,13 +1188,13 @@ for a structure field, it indicates that the field is optional
 
 =item min
 
-the minimum length/size, only for some types
-(integer, number, string, list and table)
+the minimum length/size, only for some types (integer, number, string, list
+and table)
 
 =item max
 
-the maximum length/size, only for some types
-(integer, number, string, list and table)
+the maximum length/size, only for some types (integer, number, string, list
+and table)
 
 =item match
 
@@ -1165,8 +1202,8 @@ a regular expression used to validate a string or table keys
 
 =item check
 
-a code reference allowing to run user-supplied code to further
-validate the data
+a code reference allowing to run user-supplied code to further validate the
+data
 
 =back
 
@@ -1243,6 +1280,10 @@ any number (this is tested using a regular expression)
 =item integer
 
 any integer (this is tested using a regular expression)
+
+=item duration
+
+any duration (integers with optional time suffixes)
 
 =item size
 
@@ -1334,8 +1375,8 @@ something valid according to the given named schema
 
 =head2 CONFIGURATION VALIDATION
 
-This module works well with L<Config::General>. In particular, the
-C<list?(X)> type matches the way L<Config::General> merges blocks.
+This module works well with L<Config::General>. In particular, the C<list?(X)>
+type matches the way L<Config::General> merges blocks.
 
 For instance, one could use the following code:
 
@@ -1388,9 +1429,8 @@ where C<$cfg{host}{service}> is the list of service hashes.
 
 =head2 OPTIONS VALIDATION
 
-This module interacts nicely with L<Getopt::Long>: the options()
-method can be used to convert a schema into a list of L<Getopt::Long>
-options.
+This module interacts nicely with L<Getopt::Long>: the options() method can be
+used to convert a schema into a list of L<Getopt::Long> options.
 
 Here is a simple example:
 
@@ -1421,8 +1461,8 @@ Here is a simple example:
 
 =head2 ADVANCED VALIDATION
 
-This module can also be used to combine configuration and options
-validation using the same schema. The idea is to:
+This module can also be used to combine configuration and options validation
+using the same schema. The idea is to:
 
 =over
 
@@ -1432,8 +1472,8 @@ define a unique schema validating both configuration and options
 
 =item *
 
-parse the command line options using L<Getopt::Long> (first pass, to
-detect a C<--config> option)
+parse the command line options using L<Getopt::Long> (first pass, to detect a
+C<--config> option)
 
 =item *
 
@@ -1441,8 +1481,8 @@ read the configuration file using L<Config::General>
 
 =item *
 
-parse again the command line options, using the configuration data as
-default values
+parse again the command line options, using the configuration data as default
+values
 
 =item *
 
@@ -1450,8 +1490,8 @@ validate the merged configuration/options data
 
 =back
 
-In some situations, it may make sense to consider the configuration
-data as a tree and prefer:
+In some situations, it may make sense to consider the configuration data as a
+tree and prefer:
 
   <incoming>
     uri = foo://host1:1234
@@ -1465,17 +1505,16 @@ to:
   incoming-uri = foo://host1:1234
   outgoing-uri = foo://host2:2345
 
-The options() method flatten the schema to get a list of command line
-options and the treeify() function transform flat options (as returned
-by L<Getopt::Long>) into a deep tree so that it matches the schema.
-Then the treeval() function can conveniently access the value of an
-option.
+The options() method flatten the schema to get a list of command line options
+and the treeify() function transform flat options (as returned by
+L<Getopt::Long>) into a deep tree so that it matches the schema.  Then the
+treeval() function can conveniently access the value of an option.
 
-See the bundled examples for complete working programs illustrating
-some of the possibilities of this module.
+See the bundled examples for complete working programs illustrating some of
+the possibilities of this module.
 
 =head1 AUTHOR
 
 Lionel Cons L<http://cern.ch/lionel.cons>
 
-Copyright (C) CERN 2012-2013
+Copyright (C) CERN 2012-2014

@@ -1,5 +1,8 @@
 Revision history for Config-Validator:
 
+1.2	Fri Feb 14 2014
+	* Added yet another built-in type: duration.
+
 1.1	Thu Nov 28 2013
 	* Added more built-in types: hostname, ipv4, ipv6 and size.
 
